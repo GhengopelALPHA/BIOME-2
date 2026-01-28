@@ -65,6 +65,13 @@ public sealed class WorldModel {
 		LayerCount = _layerCount;
 
 		CreateLayers();
+
+		// TODO: temp test species
+		SetSpeciesList([
+			new SpeciesModel("Empty", new Color4(0f, 0f, 0f, 0f)),
+			new SpeciesModel("Grass", new Color4(0f, 1f, 0f, 1f)),
+			new SpeciesModel("Water", new Color4(0f, 0f, 1f, 1f))
+		]);
 	}
 
 	private void CreateLayers() {
@@ -152,6 +159,7 @@ public sealed class WorldModel {
 		}
 
 		// Publish new flattened palette for subscribers (e.g., renderer).
-		SpeciesPaletteChanged?.Invoke(_speciesPalette);
+		// Invoke with a cloned copy so subscribers cannot mutate internal state.
+		SpeciesPaletteChanged?.Invoke(GetSpeciesPalette());
 	}
 }

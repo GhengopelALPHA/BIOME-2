@@ -17,24 +17,4 @@ public sealed class SpeciesModel {
 		_name = name;
 		_color = color;
 	}
-
-	public void NewSpecies(string name, Color4 color) {
-		_name = name;
-		_color = color;
-	}
-
-	/// <summary>
-	/// Convert the stored Color4 (components in 0..1) to RGBA8 bytes.
-	/// </summary>
-	public byte[] ToRgbaBytes() {
-		static byte Conv(float v) =>
-			(byte)Math.Clamp((int)MathF.Round(v * 255f), 0, 255);
-
-		return new byte[] {
-			Conv(_color.R),
-			Conv(_color.G),
-			Conv(_color.B),
-			Conv(_color.A)
-		};
-	}
 }

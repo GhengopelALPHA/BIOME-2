@@ -139,8 +139,9 @@ public sealed class Renderer : IDisposable {
 	}
 
 	private void OnWorldSpeciesPaletteChanged(byte[] palette) {
-		// Copy palette for renderer use. Keep a copy to avoid sharing memory with world.
-		_speciesPalette = palette is null || palette.Length == 0 ? Array.Empty<byte>() : (byte[])palette.Clone();
+		// The world now publishes a cloned palette payload. Keep a local copy
+		// so the renderer does not share owned arrays with the world.
+		_speciesPalette = (palette is null || palette.Length == 0) ? Array.Empty<byte>() : (byte[])palette.Clone();
 	}
 
 	public void Render(Camera camera) {

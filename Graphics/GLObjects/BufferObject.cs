@@ -13,8 +13,8 @@ public sealed class BufferObject : IDisposable {
 
 	public void Bind() => GL.BindBuffer(_target, Handle);
 
-    public void SetData<T>(ReadOnlySpan<T> data, BufferUsageHint usage) where T : unmanaged {
-        Bind();
+	public void SetData<T>(ReadOnlySpan<T> data, BufferUsageHint usage) where T : unmanaged {
+		Bind();
         int sizeOfT = System.Runtime.InteropServices.Marshal.SizeOf<T>();
         long byteLength = (long)data.Length * sizeOfT;
 
@@ -31,7 +31,7 @@ public sealed class BufferObject : IDisposable {
         } finally {
             handle.Free();
         }
-    }
+	}
 
 	public void Dispose() {
 		GL.DeleteBuffer(Handle);

@@ -376,48 +376,48 @@ public sealed class ImGuiController : IDisposable
 
     // Map OpenTK Keys to ImGuiNET ImGuiKey.
     // Keep mapping conservative to avoid referencing enum members that may not exist across OpenTK versions.
-    private static ImGuiKey ToImGuiKey(Keys key)
+    private static ImGuiKey ToImGuiKey(OpenTK.Windowing.GraphicsLibraryFramework.Keys key)
     {
         // Letters A..Z (assumes contiguous ranges)
-        if (key >= Keys.A && key <= Keys.Z)
+        if (key >= OpenTK.Windowing.GraphicsLibraryFramework.Keys.A && key <= OpenTK.Windowing.GraphicsLibraryFramework.Keys.Z)
         {
-            return (ImGuiKey)((int)ImGuiKey.A + ((int)key - (int)Keys.A));
+            return (ImGuiKey)((int)ImGuiKey.A + ((int)key - (int)OpenTK.Windowing.GraphicsLibraryFramework.Keys.A));
         }
 
         // Function keys F1..F12 (assumes contiguous ranges)
-        if (key >= Keys.F1 && key <= Keys.F12)
+        if (key >= OpenTK.Windowing.GraphicsLibraryFramework.Keys.F1 && key <= OpenTK.Windowing.GraphicsLibraryFramework.Keys.F12)
         {
-            return (ImGuiKey)((int)ImGuiKey.F1 + ((int)key - (int)Keys.F1));
+            return (ImGuiKey)((int)ImGuiKey.F1 + ((int)key - (int)OpenTK.Windowing.GraphicsLibraryFramework.Keys.F1));
         }
 
         switch (key)
         {
-            case Keys.Tab: return ImGuiKey.Tab;
-            case Keys.Left: return ImGuiKey.LeftArrow;
-            case Keys.Right: return ImGuiKey.RightArrow;
-            case Keys.Up: return ImGuiKey.UpArrow;
-            case Keys.Down: return ImGuiKey.DownArrow;
-            case Keys.PageUp: return ImGuiKey.PageUp;
-            case Keys.PageDown: return ImGuiKey.PageDown;
-            case Keys.Home: return ImGuiKey.Home;
-            case Keys.End: return ImGuiKey.End;
-            case Keys.Insert: return ImGuiKey.Insert;
-            case Keys.Delete: return ImGuiKey.Delete;
-            case Keys.Backspace: return ImGuiKey.Backspace;
-            case Keys.Space: return ImGuiKey.Space;
-            case Keys.Enter: return ImGuiKey.Enter;
-            case Keys.Escape: return ImGuiKey.Escape;
-            case Keys.LeftShift: return ImGuiKey.LeftShift;
-            case Keys.RightShift: return ImGuiKey.RightShift;
-            case Keys.LeftControl: return ImGuiKey.LeftCtrl;
-            case Keys.RightControl: return ImGuiKey.RightCtrl;
-            case Keys.LeftAlt: return ImGuiKey.LeftAlt;
-            case Keys.RightAlt: return ImGuiKey.RightAlt;
-            case Keys.CapsLock: return ImGuiKey.CapsLock;
-            case Keys.ScrollLock: return ImGuiKey.ScrollLock;
-            case Keys.NumLock: return ImGuiKey.NumLock;
-            case Keys.PrintScreen: return ImGuiKey.PrintScreen;
-            case Keys.Pause: return ImGuiKey.Pause;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Tab: return ImGuiKey.Tab;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Left: return ImGuiKey.LeftArrow;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Right: return ImGuiKey.RightArrow;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Up: return ImGuiKey.UpArrow;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Down: return ImGuiKey.DownArrow;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.PageUp: return ImGuiKey.PageUp;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.PageDown: return ImGuiKey.PageDown;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Home: return ImGuiKey.Home;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.End: return ImGuiKey.End;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Insert: return ImGuiKey.Insert;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Delete: return ImGuiKey.Delete;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Backspace: return ImGuiKey.Backspace;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Space: return ImGuiKey.Space;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Enter: return ImGuiKey.Enter;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Escape: return ImGuiKey.Escape;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftShift: return ImGuiKey.LeftShift;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightShift: return ImGuiKey.RightShift;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftControl: return ImGuiKey.LeftCtrl;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightControl: return ImGuiKey.RightCtrl;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftAlt: return ImGuiKey.LeftAlt;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightAlt: return ImGuiKey.RightAlt;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.CapsLock: return ImGuiKey.CapsLock;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.ScrollLock: return ImGuiKey.ScrollLock;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.NumLock: return ImGuiKey.NumLock;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.PrintScreen: return ImGuiKey.PrintScreen;
+            case OpenTK.Windowing.GraphicsLibraryFramework.Keys.Pause: return ImGuiKey.Pause;
             default:
                 return ImGuiKey.None;
         }

@@ -1,7 +1,7 @@
 ﻿using Biome2.Diagnostics;
 using System;
 using System.Linq;
-using Biome2.Rules;
+using Biome2.FileLoading;
 using OpenTK.Mathematics;
 
 namespace Biome2.World;
@@ -23,6 +23,8 @@ public sealed class WorldModel {
 	private readonly List<WorldLayer> _layers = new();
 	public IReadOnlyList<WorldLayer> Layers => _layers;
 
+	public IReadOnlyList<string> LayerNames => _layers.Select(l => l.Name).ToList();
+
 	// Layer viewing can swap which layer is currently visible.
 	public int ActiveLayerIndex { get; set; } = 0;
 
@@ -41,7 +43,7 @@ public sealed class WorldModel {
     // defined, an empty array is provided.
     public event Action<byte[]>? SpeciesPaletteChanged;
 
-	private WorldModel(int widthCells, int heightCells, int layerCount) {
+	public WorldModel(int widthCells, int heightCells, int layerCount) {
 		// bound checking
 		var _widthCells = widthCells;
 		var _heightCells = heightCells;
@@ -67,11 +69,11 @@ public sealed class WorldModel {
 		CreateLayers();
 
 		// TODO: temp test species
-		SetSpeciesList([
+		/*SetSpeciesList([
 			new SpeciesModel("Empty", 0, 0, 0, 255),
 			new SpeciesModel("Grass", 0, 200, 0, 255),
 			new SpeciesModel("Water", 0, 150, 200, 255)
-		]);
+		]);*/
 	}
 
 	private void CreateLayers() {
@@ -96,6 +98,14 @@ public sealed class WorldModel {
 		if (species is null) throw new ArgumentNullException(nameof(species));
 		_species = species.ToList();
 		BuildSpeciesPalette();
+	}
+
+	public int GetLayerIndex(string name) {
+		if (string.IsNullOrEmpty(name)) return -1;
+		for (int i = 0; i < _layers.Count; i++) {
+			if (string.Equals(_layers[i].Name, name, StringComparison.Ordinal)) return i;
+		}
+		return -1;
 	}
 
 	/// <summary>

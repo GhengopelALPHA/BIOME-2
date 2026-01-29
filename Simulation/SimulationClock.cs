@@ -10,6 +10,9 @@ public sealed class SimulationClock {
 	// Fixed timestep for deterministic updates later.
 	public float FixedStepSeconds { get; set; } = 1.0f / 30.0f;
 
+	// DelayTime: extra delay in seconds added to each simulation step. 0.0 = no extra delay.
+	public float DelayTime { get; set; } = 0.0f;
+
 	private float _accumulatorSeconds;
 
 	public int ConsumeSteps(float dtSeconds) {
@@ -19,8 +22,11 @@ public sealed class SimulationClock {
 		_accumulatorSeconds += dtSeconds;
 		int steps = 0;
 
-		while (_accumulatorSeconds >= FixedStepSeconds) {
-			_accumulatorSeconds -= FixedStepSeconds;
+		// Effective step interval includes the configured extra DelayTime (seconds).
+		float effectiveStep = FixedStepSeconds + DelayTime;
+
+		while (_accumulatorSeconds >= effectiveStep) {
+			_accumulatorSeconds -= effectiveStep;
 			steps++;
 		}
 

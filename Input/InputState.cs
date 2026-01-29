@@ -53,13 +53,13 @@ public sealed class InputState {
 		MouseRightDown = mouse.IsButtonDown(MouseButton.Right);
 		MouseMiddleDown = mouse.IsButtonDown(MouseButton.Middle);
 
-		KeyW = keyboard.IsKeyDown(Keys.W);
-		KeyA = keyboard.IsKeyDown(Keys.A);
-		KeyS = keyboard.IsKeyDown(Keys.S);
-		KeyD = keyboard.IsKeyDown(Keys.D);
+        KeyW = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.W);
+        KeyA = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.A);
+        KeyS = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.S);
+        KeyD = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.D);
 
-		KeyShift = keyboard.IsKeyDown(Keys.LeftShift) || keyboard.IsKeyDown(Keys.RightShift);
-		KeyCtrl = keyboard.IsKeyDown(Keys.LeftControl) || keyboard.IsKeyDown(Keys.RightControl);
+        KeyShift = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftShift) || keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightShift);
+        KeyCtrl = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftControl) || keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightControl);
 	}
 
 	// Called by ImGuiController to set capture flags.

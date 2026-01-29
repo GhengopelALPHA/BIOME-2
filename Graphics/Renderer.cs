@@ -142,6 +142,7 @@ public sealed class Renderer : IDisposable {
 		// The world now publishes a cloned palette payload. Keep a local copy
 		// so the renderer does not share owned arrays with the world.
 		_speciesPalette = (palette is null || palette.Length == 0) ? Array.Empty<byte>() : (byte[])palette.Clone();
+		UploadGridToTexture(_world.ActiveLayer.Grid);
 	}
 
 	public void Render(Camera camera) {
@@ -149,6 +150,11 @@ public sealed class Renderer : IDisposable {
 
 		if (_world == null)
 			return;
+
+		// Ensure GPU texture is up-to-date with the current active layer before drawing.
+		// This keeps rendering decoupled from simulation stepping and allows the
+		// renderer to update at its own cadence.
+		UploadGridToTexture(_world.ActiveLayer.Grid);
 
 		_shader.Use();
 		_vao.Bind();

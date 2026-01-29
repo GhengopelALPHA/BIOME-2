@@ -52,6 +52,9 @@ public sealed class BiomeApp : GameWindow {
 
 		_simulation = new SimulationController(_world);
 
+		// Listen for world replacement so subsystems (renderer, camera) can update.
+		_simulation.WorldReplaced += OnWorldReplaced;
+
 		_renderer = new Renderer(_config.CellSize);
 		_renderer.Initialize();
 		_renderer.SetWorld(_world);
@@ -65,6 +68,15 @@ public sealed class BiomeApp : GameWindow {
 			worldHeight: _world.HeightCells * _config.CellSize);
 
 		Logger.Info("App loaded.");
+	}
+
+	private void OnWorldReplaced(WorldModel newWorld) {
+		// Update local reference and notify renderer and camera.
+		_world = newWorld;
+		_renderer.SetWorld(_world);
+		_camera.FrameWorld(
+			worldWidth: _world.WidthCells * _config.CellSize,
+			worldHeight: _world.HeightCells * _config.CellSize);
 	}
 
 	protected override void OnResize(ResizeEventArgs e) {
@@ -110,7 +122,11 @@ public sealed class BiomeApp : GameWindow {
 
 	protected override void OnUnload() {
 		base.OnUnload();
+		// Unsubscribe from simulation events
+		if (_simulation != null) _simulation.WorldReplaced -= OnWorldReplaced;
 		_renderer.Dispose();
+        // Ensure background simulation stopped
+        _simulation.Dispose();
 		Logger.Info("App unloaded.");
 	}
 }

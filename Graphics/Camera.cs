@@ -37,7 +37,7 @@ public sealed class Camera {
 		// Fit world into viewport.
 		var scaleX = ViewportWidth / worldWidth;
 		var scaleY = ViewportHeight / worldHeight;
-		Zoom = MathF.Min(scaleX, scaleY);
+		Zoom = MathF.Min(scaleX, scaleY) * 0.9f;
 
 		Position = new Vector2(worldWidth * 0.5f, worldHeight * 0.5f);
 	}

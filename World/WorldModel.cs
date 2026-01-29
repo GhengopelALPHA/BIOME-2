@@ -67,13 +67,6 @@ public sealed class WorldModel {
 		LayerCount = _layerCount;
 
 		CreateLayers();
-
-		// TODO: temp test species
-		/*SetSpeciesList([
-			new SpeciesModel("Empty", 0, 0, 0, 255),
-			new SpeciesModel("Grass", 0, 200, 0, 255),
-			new SpeciesModel("Water", 0, 150, 200, 255)
-		]);*/
 	}
 
 	private void CreateLayers() {

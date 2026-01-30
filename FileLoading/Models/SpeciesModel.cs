@@ -2,7 +2,7 @@
 using OpenTK.Mathematics;
 using System;
 
-namespace Biome2.FileLoading;
+namespace Biome2.FileLoading.Models;
 
 public sealed class SpeciesModel {
 	private string _name = string.Empty;

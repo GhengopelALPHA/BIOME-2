@@ -1,10 +1,11 @@
-﻿namespace Biome2.FileLoading;
+﻿namespace Biome2.FileLoading.Models;
 
 /// <summary>
-/// A safe transport object representing a load request.
-/// Later this can include parsed AST, compiled opcode blobs, metadata, and validation messages.
+/// A safe transport object representing a loaded world definition from a rules file.
+/// This carries parsed species, layer names, rules, and basic settings but does not
+/// contain any resolved indexes. It is intended for file-loading only.
 /// </summary>
-public sealed class RulesFileRequest {
+public sealed class WorldModel {
     // Parsed settings
     public int Width { get; init; }
     public int Height { get; init; }
@@ -22,7 +23,7 @@ public sealed class RulesFileRequest {
     // Edge handling mode for neighbor queries
     public EdgeMode Edges { get; init; } = EdgeMode.BORDER;
 
-    public RulesFileRequest(
+    public WorldModel(
         int width,
         int height,
         bool paused,
@@ -38,5 +39,5 @@ public sealed class RulesFileRequest {
         Layers = layers ?? Array.Empty<string>();
         Rules = rules ?? Array.Empty<RulesModel>();
         Edges = edges;
-	}
+    }
 }

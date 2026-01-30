@@ -25,7 +25,7 @@ public sealed class BiomeApp : GameWindow {
 
 	private Graphics.ImGuiController? _ui;
 
-	private WorldModel _world = null!;
+    private WorldState _world = null!;
 	private SimulationController _simulation = null!;
 
 	public BiomeApp(AppConfig config)
@@ -48,9 +48,9 @@ public sealed class BiomeApp : GameWindow {
 		_input = new InputState();
 		_camera = new Camera(Size.X, Size.Y);
 
-		_world = WorldModel.CreateBlank();
+        _world = WorldState.CreateBlank();
 
-		_simulation = new SimulationController(_world);
+        _simulation = new SimulationController(_world);
 
 		// Listen for world replacement so subsystems (renderer, camera) can update.
 		_simulation.WorldReplaced += OnWorldReplaced;
@@ -70,7 +70,7 @@ public sealed class BiomeApp : GameWindow {
 		Logger.Info("App loaded.");
 	}
 
-	private void OnWorldReplaced(WorldModel newWorld) {
+    private void OnWorldReplaced(WorldState newWorld) {
 		// Update local reference and notify renderer and camera.
 		_world = newWorld;
 		_renderer.SetWorld(_world);
@@ -82,7 +82,7 @@ public sealed class BiomeApp : GameWindow {
 	protected override void OnResize(ResizeEventArgs e) {
 		base.OnResize(e);
 		_camera.Resize(e.Width, e.Height);
-		_renderer.Resize(e.Width, e.Height);
+		Renderer.Resize(e.Width, e.Height);
 	}
 
 	protected override void OnUpdateFrame(FrameEventArgs args) {
@@ -98,6 +98,9 @@ public sealed class BiomeApp : GameWindow {
 		// Camera movement now, UI can override input capture.
 		_camera.Update(_input, (float) args.Time);
 
+		// Let input state handle interactions like panning and placement (uses camera, renderer, simulation)
+		_input.HandleInteractions(_camera, _renderer, _simulation);
+
 		// Simulation currently runs only when enabled.
 		// Later, you will add multithread stepping, pause, headless mode, etc.
 		_simulation.Update((float) args.Time);
@@ -112,8 +115,8 @@ public sealed class BiomeApp : GameWindow {
 
 		_renderer.Render(_camera);
 
-		// Render UI on top of world
-		_ui?.RenderUI(_renderer, _simulation);
+        // Render UI on top of world
+        _ui?.RenderUI(_renderer, _simulation, _camera, _input);
 
 		SwapBuffers();
 
@@ -123,10 +126,12 @@ public sealed class BiomeApp : GameWindow {
 	protected override void OnUnload() {
 		base.OnUnload();
 		// Unsubscribe from simulation events
-		if (_simulation != null) _simulation.WorldReplaced -= OnWorldReplaced;
-		_renderer.Dispose();
-        // Ensure background simulation stopped
-        _simulation.Dispose();
+		if (_simulation != null) {
+			_simulation.WorldReplaced -= OnWorldReplaced;
+
+			_renderer.Dispose();
+			_simulation.Dispose();
+		}
 		Logger.Info("App unloaded.");
 	}
 }

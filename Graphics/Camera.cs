@@ -14,11 +14,7 @@ public sealed class Camera {
 	public Vector2 Position { get; private set; } = Vector2.Zero;
 	public float Zoom { get; private set; } = 1.0f;
 
-	// Left mouse drag state for panning with a small movement threshold.
-	private bool _leftMouseWasDown;
-	private bool _leftDragStarted;
-	private Vector2 _leftDragStart;
-	private const float LeftMouseDragThreshold = 4.0f; // pixels
+    // Right mouse drag state for panning with a small movement threshold.
 	private const float MinFarnessZoomFactor = 1.0f;
 	private const float MaxClosenessZoomFactor = 300.0f;
 	private const float ZoomScrollWheelFactor = 0.2f;
@@ -65,31 +61,7 @@ public sealed class Camera {
 			Position += worldBefore - worldAfter;
 		}
 
-		// Left mouse drag pan with small movement threshold to avoid accidental pans.
-		if (input.MouseLeftDown) {
-			if (!_leftMouseWasDown) {
-				_leftMouseWasDown = true;
-				_leftDragStarted = false;
-				_leftDragStart = new Vector2(input.MouseX, input.MouseY);
-			} else {
-				if (!_leftDragStarted) {
-					var dx = input.MouseX - _leftDragStart.X;
-					var dy = input.MouseY - _leftDragStart.Y;
-					if (dx * dx + dy * dy > LeftMouseDragThreshold * LeftMouseDragThreshold) {
-						_leftDragStarted = true;
-						// Start panning; consume current delta.
-						var drag = new Vector2(input.MouseDeltaX, -input.MouseDeltaY);
-						Position -= ApplyZoomFactor(drag);
-					}
-				} else {
-					var drag = new Vector2(input.MouseDeltaX, -input.MouseDeltaY);
-					Position -= ApplyZoomFactor(drag);
-				}
-			}
-		} else {
-			_leftMouseWasDown = false;
-			_leftDragStarted = false;
-		}
+        // Right mouse panning is now handled by InputState.HandleInteractions.
 	}
 
 	private void HandleKeyboardMovement(InputState input, float dt) {
@@ -129,7 +101,7 @@ public sealed class Camera {
 		return projection;
 	}
 
-	private Vector2 ScreenToWorld(Vector2 screenPos, float zoomOverride) {
+    public Vector2 ScreenToWorld(Vector2 screenPos, float zoomOverride) {
 		// Screen origin is top-left with Y down (from InputState). Convert to NDC-style world coords.
 		var halfW = ApplyZoomFactor(ViewportWidth * 0.5f, zoomOverride);
 		var halfH = ApplyZoomFactor(ViewportHeight * 0.5f, zoomOverride);
@@ -153,5 +125,10 @@ public sealed class Camera {
         // works for both float and Vector2 (OpenTK.Mathematics.Vector2) without duplicating logic.
         var denom = MathF.Max(overrideZoom >= 0 ? overrideZoom : Zoom, 0.001f);
         return (T)((dynamic)value / denom);
+    }
+
+    // Public helper to pan the camera by a screen-space delta that is adjusted by zoom.
+    public void PanBy(Vector2 screenDelta) {
+        Position -= ApplyZoomFactor(screenDelta);
     }
 }

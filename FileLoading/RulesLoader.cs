@@ -2,6 +2,7 @@
 using System.IO;
 using System.Collections.Generic;
 using Biome2.Diagnostics;
+using Biome2.FileLoading.Models;
 
 namespace Biome2.FileLoading;
 
@@ -10,7 +11,7 @@ namespace Biome2.FileLoading;
 /// The UI will call into this service later (open file dialog, recent files, drag drop).
 /// </summary>
 public sealed class RulesLoader {
-    public RulesFileRequest Load(string path) {
+    public WorldModel Load(string path) {
         if (string.IsNullOrEmpty(path))
             throw new ArgumentNullException(nameof(path));
 
@@ -229,8 +230,8 @@ public sealed class RulesLoader {
             }
         }
 
-        // produce final request object with parsed data
-        var final = new RulesFileRequest(
+        // produce final world file model with parsed data (file-loading WorldModel)
+        var final = new WorldModel(
             width: w,
             height: h,
             paused: paused,

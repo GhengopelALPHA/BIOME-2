@@ -25,7 +25,7 @@ public sealed class Renderer : IDisposable {
 	private VertexArrayObject _axisVao = null!;
 	private BufferObject _axisVbo = null!;
 
-	private WorldModel _world = null!;
+    private WorldState _world = null!;
 
 	private int _uViewProj;
 	private int _uCellSize;
@@ -39,6 +39,10 @@ public sealed class Renderer : IDisposable {
 	public bool ShowGrid { get; set; } = false;
 	public bool ShowAxes { get; set; } = true;
 
+    // When false, renderer will skip drawing; useful for pausing visual updates while
+    // leaving simulation state intact. Default = true (drawing enabled).
+    public bool DrawingEnabled { get; set; } = true;
+
 	public float GridThicknessPixels { get; set; } = 1.0f;
 
 	private Vector2[] _instancePositions = Array.Empty<Vector2>();
@@ -51,11 +55,14 @@ public sealed class Renderer : IDisposable {
 	private byte[] _speciesPalette = Array.Empty<byte>();
 
     // default fallback color when palette empty
-	private static readonly byte[] _defaultFallbackColor = [255, 255, 255, 255];
+    private static readonly byte[] _defaultFallbackColor = [255, 255, 255, 255];
 
 	public Renderer(float cellSize) {
 		_cellSize = cellSize;
 	}
+
+    // Expose cell size for UI placement calculations
+    public float CellSize => _cellSize;
 
 	public void Initialize() {
 		GL.ClearColor(0.08f, 0.08f, 0.10f, 1.0f);
@@ -76,14 +83,13 @@ public sealed class Renderer : IDisposable {
 		_vao.Bind();
 
 		// A unit quad in local space (0 to 1), the shader scales by cell size.
-		_quadVbo = new BufferObject(BufferTarget.ArrayBuffer);
-		_quadVbo.SetData<Vector2>(
-		[
-			new(0, 0),
-			new(1, 0),
-			new(1, 1),
-			new(0, 1),
-		], BufferUsageHint.StaticDraw);
+        _quadVbo = new BufferObject(BufferTarget.ArrayBuffer);
+        _quadVbo.SetData<Vector2>([
+            new Vector2(0, 0),
+            new Vector2(1, 0),
+            new Vector2(1, 1),
+            new Vector2(0, 1),
+        ], BufferUsageHint.StaticDraw);
 
 		GL.EnableVertexAttribArray(0);
 		GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
@@ -105,9 +111,9 @@ public sealed class Renderer : IDisposable {
 		_axisVao = new VertexArrayObject();
 		_axisVao.Bind();
 
-		_axisVbo = new BufferObject(BufferTarget.ArrayBuffer);
-		// allocate initial empty buffer, will be filled when world is set
-		_axisVbo.SetData<Vector2>([new(0, 0), new(0, 0), new(0, 0), new(0, 0)], BufferUsageHint.DynamicDraw);
+        _axisVbo = new BufferObject(BufferTarget.ArrayBuffer);
+        // allocate initial empty buffer, will be filled when world is set
+        _axisVbo.SetData<Vector2>([new Vector2(0, 0), new Vector2(0, 0), new Vector2(0, 0), new Vector2(0, 0)], BufferUsageHint.DynamicDraw);
 
 		GL.EnableVertexAttribArray(0);
 		GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
@@ -115,13 +121,13 @@ public sealed class Renderer : IDisposable {
 		Logger.Info("Renderer initialized.");
 	}
 
-	public void SetWorld(WorldModel world) {
+    public void SetWorld(WorldState world) {
 		// Unsubscribe from previous world palette events if needed
 		if (_world != null) {
 			_world.SpeciesPaletteChanged -= OnWorldSpeciesPaletteChanged;
 		}
 
-		_world = world;
+        _world = world;
 
 		// Subscribe to receive palette updates and copy initial palette
 		_world.SpeciesPaletteChanged += OnWorldSpeciesPaletteChanged;
@@ -134,18 +140,22 @@ public sealed class Renderer : IDisposable {
 		UploadGridToTexture(_world.ActiveLayer.Grid);
 	}
 
-	public void Resize(int width, int height) {
+	public static void Resize(int width, int height) {
 		GL.Viewport(0, 0, width, height);
 	}
 
 	private void OnWorldSpeciesPaletteChanged(byte[] palette) {
 		// The world now publishes a cloned palette payload. Keep a local copy
 		// so the renderer does not share owned arrays with the world.
-		_speciesPalette = (palette is null || palette.Length == 0) ? Array.Empty<byte>() : (byte[])palette.Clone();
+		_speciesPalette = (palette is null || palette.Length == 0) ? [] : (byte[])palette.Clone();
 		UploadGridToTexture(_world.ActiveLayer.Grid);
 	}
 
 	public void Render(Camera camera) {
+		// If drawing is disabled, skip world rendering entirely so the last
+		// drawn frame remains visible and only the UI will be updated.
+		if (!DrawingEnabled) return;
+
 		GL.Clear(ClearBufferMask.ColorBufferBit);
 
 		if (_world == null)
@@ -318,13 +328,12 @@ public sealed class Renderer : IDisposable {
 		float maxX = _world.WidthCells * _cellSize;
 		float maxY = _world.HeightCells * _cellSize;
 
-		Vector2[] pts =
-		[
-			new Vector2(0, 0), // origin
-			new Vector2(maxX, 0), // +X
-			new Vector2(0, 0), // origin
-			new Vector2(0, maxY), // +Y
-		];
+        Vector2[] pts = [
+            new(0, 0), // origin
+            new(maxX, 0), // +X
+            new(0, 0), // origin
+            new(0, maxY), // +Y
+        ];
 
 		_axisVbo.SetData<Vector2>(pts, BufferUsageHint.StaticDraw);
 	}

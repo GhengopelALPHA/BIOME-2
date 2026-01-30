@@ -24,6 +24,7 @@ public sealed class CellGrid {
 	public int IndexOf(int x, int y) => (y * Width) + x;
 
 	public byte GetCurrent(int x, int y) => _current[IndexOf(x, y)];
+    public void SetCurrent(int x, int y, byte value) => _current[IndexOf(x, y)] = value;
 	public void SetNext(int x, int y, byte value) => _next[IndexOf(x, y)] = value;
 
 	public void Clear(byte value = 0) {

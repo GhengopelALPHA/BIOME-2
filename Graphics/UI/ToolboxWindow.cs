@@ -135,6 +135,10 @@ internal sealed class ToolboxWindow
 		}
 		ImGui.PopItemWidth();
 
+		ImGui.Separator();
+
+		ImGui.BeginChild("##ScrollableArea", new Vector2(-1, 430));
+
 		// ShowGrid toggle
 		bool showGrid = renderer.ShowGrid;
 		if (ImGui.Checkbox("Show Grid", ref showGrid)) {
@@ -237,6 +241,8 @@ internal sealed class ToolboxWindow
 				input.SetSelectedSpeciesIndices([.. selected]);
 			}
         }
+
+		ImGui.EndChild();
 
 		ImGui.Separator();
 

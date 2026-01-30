@@ -206,8 +206,7 @@ public sealed class SimulationController : IDisposable {
         var newEdgeMode = worldModel.Edges;
 
         // Convert file models to simulation models using the new world for name resolution.
-        var (simRules, simIndex, simLayersWithRules, warnings) = RuleSetBuilder.Build(fileRules, newWorld);
-        foreach (var w in warnings) Logger.Warn(w);
+        var (simRules, simIndex, simLayersWithRules) = RuleSetBuilder.Build(fileRules, newWorld);
 
         // Swap world and rules under lock to avoid racing with stepping.
         lock (_stepLock) {
@@ -265,11 +264,11 @@ public sealed class SimulationController : IDisposable {
 				int x = idx % grid.Width;
 				byte originValue = grid.GetCurrent(x, y);
 
-				bool appliedThisLayer = false;
+				//bool appliedThisLayer = false;
 				if (_ruleIndex.TryGetValue((layerIndex, originValue), out var candidates)) {
 					foreach (var rule in candidates) {
-						if (appliedThisLayer)
-							break;
+						//if (appliedThisLayer)
+							//break;
 
 						bool allReactantsMatch = CheckAllReactantsMatch(layer, y, x, rule);
 						if (allReactantsMatch) {
@@ -283,8 +282,8 @@ public sealed class SimulationController : IDisposable {
 									}
 
 									rule.IncrementOpCount();
-									appliedThisLayer = true;
-									break;
+									//appliedThisLayer = true;
+									//break;
 								}
 							}
 						}

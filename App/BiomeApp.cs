@@ -118,8 +118,8 @@ public sealed class BiomeApp : GameWindow {
 		// Draw placement highlight overlay (based on input)
 		_renderer.DrawHighlight(_camera, _input);
 
-		// Render UI on top of world
-		_ui?.RenderUI(_renderer, _simulation, _input);
+        // Render UI on top of world
+        _ui?.RenderUI(_renderer, _simulation, _input, _camera);
 
 		SwapBuffers();
 

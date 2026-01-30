@@ -1,7 +1,8 @@
-using System.Collections.Generic;
-using Biome2.World;
-using Biome2.Simulation.Models;
+using Biome2.Diagnostics;
 using Biome2.FileLoading.Models;
+using Biome2.Simulation.Models;
+using Biome2.World;
+using System.Collections.Generic;
 
 namespace Biome2.Simulation;
 
@@ -10,7 +11,7 @@ namespace Biome2.Simulation;
 /// Returns warnings encountered during conversion.
 /// </summary>
 public static class RuleSetBuilder {
-    public static (List<SimulationRule> rules, Dictionary<(int layer, int origin), List<SimulationRule>> index, HashSet<int> layersWithRules, List<string> warnings)
+    public static (List<SimulationRule> rules, Dictionary<(int layer, int origin), List<SimulationRule>> index, HashSet<int> layersWithRules)
         Build(IReadOnlyList<RulesModel> fileRules, WorldState world)
     {
         var warnings = new List<string>();
@@ -18,24 +19,29 @@ public static class RuleSetBuilder {
         var index = new Dictionary<(int layer, int origin), List<SimulationRule>>();
         var layersWithRules = new HashSet<int>();
 
-        if (fileRules == null) return (simRules, index, layersWithRules, warnings);
+        if (fileRules == null) return (simRules, index, layersWithRules);
 
         for (int i = 0; i < fileRules.Count; i++) {
             var fr = fileRules[i];
 
             int layerIdx = world.GetLayerIndex(fr.LayerName);
-            if (layerIdx < 0) { warnings.Add($"Rule #{i+1}: unknown layer '{fr.LayerName}'"); continue; }
+            if (layerIdx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - unknown layer '{fr.LayerName}'"); continue; }
 
             int originIdx = world.GetSpeciesIndex(fr.OriginSpeciesName);
-            if (originIdx < 0) { warnings.Add($"Rule #{i+1}: unknown origin species '{fr.OriginSpeciesName}'"); continue; }
+            if (originIdx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - unknown origin species '{fr.OriginSpeciesName}'"); continue; }
 
             int newIdx = world.GetSpeciesIndex(fr.NewSpeciesName);
-            if (newIdx < 0) { warnings.Add($"Rule #{i+1}: unknown new species '{fr.NewSpeciesName}'"); continue; }
+            if (newIdx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - unknown new species '{fr.NewSpeciesName}'"); continue; }
 
-            var simReactants = new List<SimulationReactant>();
+            if (newIdx == originIdx) {
+                warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - new species is the same as origin species '{fr.NewSpeciesName}'");
+                continue;
+            }
+
+			var simReactants = new List<SimulationReactant>();
             foreach (var r in fr.Reactants) {
                 int sidx = world.GetSpeciesIndex(r.SpeciesName);
-                if (sidx < 0) { warnings.Add($"Rule #{i+1}: reactant unknown species '{r.SpeciesName}'"); continue; }
+                if (sidx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - reactant unknown species '{r.SpeciesName}'"); continue; }
 
                 int lidx;
                 if (string.IsNullOrEmpty(r.LayerName)) {
@@ -43,10 +49,15 @@ public static class RuleSetBuilder {
                     lidx = -1;
                 } else {
                     lidx = world.GetLayerIndex(r.LayerName);
-                    if (lidx < 0) { warnings.Add($"Rule #{i+1}: reactant unknown layer '{r.LayerName}'"); continue; }
+                    if (lidx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - reactant unknown layer '{r.LayerName}'"); continue; }
                 }
 
-                simReactants.Add(new SimulationReactant(sidx, lidx, r.Count, r.Sign));
+                if (r.Count == 0 && r.Sign < 0) {
+                    warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - reactant '{r.SpeciesName}' has zero count and negative sign");
+                    continue;
+                }
+
+				simReactants.Add(new SimulationReactant(sidx, lidx, r.Count, r.Sign));
             }
 
             var sr = new SimulationRule(layerIdx, originIdx, simReactants, newIdx, fr.Probability, fr.VerboseRule) {
@@ -60,6 +71,9 @@ public static class RuleSetBuilder {
             layersWithRules.Add(layerIdx);
         }
 
-        return (simRules, index, layersWithRules, warnings);
+		foreach (var w in warnings)
+			Logger.Warn(w);
+
+		return (simRules, index, layersWithRules);
     }
 }

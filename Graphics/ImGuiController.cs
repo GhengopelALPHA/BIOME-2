@@ -88,7 +88,9 @@ public sealed class ImGuiController : IDisposable
         GL.BindVertexArray(_vertexArray);
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);
 
-        int stride = Marshal.SizeOf(typeof(ImDrawVert));
+        // ImGui's ImDrawVert native layout is (float pos[2], float uv[2], uint col) => 2*4 + 2*4 + 4 = 20 bytes
+        // Use the explicit native stride to avoid managed layout/padding mismatches.
+        int stride = 20;
         GL.EnableVertexAttribArray(0);
         GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, stride, 0);
         GL.EnableVertexAttribArray(1);
@@ -110,7 +112,7 @@ public sealed class ImGuiController : IDisposable
         SetPerFrameData();
     }
 
-    public void RenderUI(Renderer renderer, Simulation.SimulationController simulation, Input.InputState input)
+    public void RenderUI(Renderer renderer, Simulation.SimulationController simulation, Input.InputState input, Camera camera)
     {
         // Start new frame
         SetPerFrameData();
@@ -118,6 +120,46 @@ public sealed class ImGuiController : IDisposable
 
         // Render the toolbox window
         _toolbox.Render(renderer, simulation, input);
+
+        // Tiny bottom-right hover overlay: show species name under mouse on active layer.
+        try
+        {
+            var world = simulation.World;
+            if (world != null)
+            {
+                // Determine hovered cell using input helper
+                var hover = input.GetHoverCell(camera, renderer);
+                int hx = hover.X;
+                int hy = hover.Y;
+
+                if (hx >= 0 && hy >= 0 && hx < world.WidthCells && hy < world.HeightCells)
+                {
+                    var grid = world.ActiveLayer.Grid;
+                    byte value = grid.GetCurrent(hx, hy);
+                    string name = world.GetSpeciesName(value);
+                    if (!string.IsNullOrEmpty(name))
+                    {
+                        var io = ImGui.GetIO();
+                        // Position at bottom-right using pivot (1,1)
+                        //ImGui.SetNextWindowBgAlpha(0.06f);
+                        ImGui.SetNextWindowPos(new System.Numerics.Vector2(io.DisplaySize.X - 8f, io.DisplaySize.Y - 8f), ImGuiCond.Always, new System.Numerics.Vector2(1f, 1f));
+                        ImGui.PushStyleVar(ImGuiStyleVar.WindowPadding, new System.Numerics.Vector2(6f, 4f));
+                        var flags = ImGuiWindowFlags.NoTitleBar | ImGuiWindowFlags.NoSavedSettings
+                                    | ImGuiWindowFlags.NoFocusOnAppearing | ImGuiWindowFlags.NoBringToFrontOnFocus | ImGuiWindowFlags.NoInputs
+                                    | ImGuiWindowFlags.AlwaysAutoResize | ImGuiWindowFlags.NoBackground;
+                        ImGui.SetNextWindowBgAlpha(0.0f);
+                        ImGui.Begin("##hover_overlay", flags);
+                        ImGui.Text(name);
+                        ImGui.End();
+                        ImGui.PopStyleVar();
+                    }
+                }
+            }
+        }
+        catch
+        {
+            // Swallow any UI errors to avoid interfering with main rendering loop
+        }
 
         ImGui.Render();
         var drawData = ImGui.GetDrawData();
@@ -171,7 +213,8 @@ public sealed class ImGuiController : IDisposable
 		GL.Viewport((int)displayPos.X, (int)displayPos.Y, (int)displaySize.X, (int)displaySize.Y);
 
         // Upload vertex/index data into a single VBO/IBO
-        int vtxSize = Marshal.SizeOf(typeof(ImDrawVert));
+        // Use the same explicit vertex size as above (native ImDrawVert = 20 bytes)
+        int vtxSize = 20;
         int idxSize = Marshal.SizeOf(typeof(ushort));
         int totalVtxBytes = drawData.TotalVtxCount * vtxSize;
         int totalIdxBytes = drawData.TotalIdxCount * idxSize;
@@ -192,6 +235,7 @@ public sealed class ImGuiController : IDisposable
 
         int vtxOffset = 0;
         int idxOffset = 0;
+        int vtxVertexBase = 0; // number of vertices already copied (for index adjustment)
         for (int n = 0; n < drawData.CmdListsCount; n++)
         {
             var cmdList = drawData.CmdLists[n];
@@ -204,9 +248,24 @@ public sealed class ImGuiController : IDisposable
             }
             if (idxBytes > 0)
             {
-                Marshal.Copy(cmdList.IdxBuffer.Data, idxData, idxOffset, idxBytes);
+                // Copy raw index bytes then reinterpret as little-endian 16-bit values so we can add vertex base.
+                int idxCount = cmdList.IdxBuffer.Size;
+                var raw = new byte[idxBytes];
+                Marshal.Copy(cmdList.IdxBuffer.Data, raw, 0, idxBytes);
+
+                // Decode, adjust, and write back into the destination idxData buffer.
+                for (int i = 0; i < idxCount; i++)
+                {
+                    int b0 = raw[i * 2];
+                    int b1 = raw[i * 2 + 1];
+                    ushort v = (ushort)(b0 | (b1 << 8));
+                    v = (ushort)(v + vtxVertexBase);
+                    idxData[idxOffset + i * 2] = (byte)(v & 0xFF);
+                    idxData[idxOffset + i * 2 + 1] = (byte)((v >> 8) & 0xFF);
+                }
                 idxOffset += idxBytes;
             }
+            vtxVertexBase += cmdList.VtxBuffer.Size;
         }
 
         GL.BindBuffer(BufferTarget.ArrayBuffer, _vbo);

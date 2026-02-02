@@ -69,6 +69,13 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 	private Vector2[] _instancePositions = [];
 
+    // Reusable upload buffers to avoid per-frame allocations
+    private byte[]? _indexUploadBuffer;
+    private byte[]? _paletteUploadBuffer;
+    private byte[] _singleByte = new byte[1];
+    private float[] _highlightInstanceData = new float[4];
+    private byte[]? _regionUploadBuffer;
+
 	// Per-cell color texture (RGBA8). Each cell maps to one texel.
 	// Per-cell species index texture (R8). Each cell stores a single byte index.
 	private int _cellIndexTex = 0;
@@ -94,13 +101,17 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		int hoverX = X;
 		int hoverY = Y;
 
-		int instanceCount = 0;
-		float[] instanceData = [];
+        int instanceCount = 0;
+        // Reuse preallocated array to avoid allocations
+        float[] instanceData = _highlightInstanceData;
 
 		if (input.GetPlacementMode() == PlacementMode.Pixel || !input.IsPlacing()) {
 			if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
-				instanceCount = 1;
-				instanceData = [hoverX * _cellSize, hoverY * _cellSize, 1.0f, 1.0f];
+                instanceCount = 1;
+                instanceData[0] = hoverX * _cellSize;
+                instanceData[1] = hoverY * _cellSize;
+                instanceData[2] = 1.0f;
+                instanceData[3] = 1.0f;
 			}
 		} else {
 			var start = input.GetPlacementStart();
@@ -113,15 +124,18 @@ public sealed class Renderer(float cellSize) : IDisposable {
 				int maxY = Math.Max(sy, hoverY);
 				int w = maxX - minX + 1;
 				int h = maxY - minY + 1;
-				instanceCount = 1;
-				instanceData = [minX * _cellSize, minY * _cellSize, (float)w, (float)h];
+                instanceCount = 1;
+                instanceData[0] = minX * _cellSize;
+                instanceData[1] = minY * _cellSize;
+                instanceData[2] = (float)w;
+                instanceData[3] = (float)h;
 			}
 		}
 
 		if (instanceCount == 0) return;
 
 		// Upload instance data (vec4 per instance: origin.x, origin.y, size.x, size.y)
-		_highlightInstanceVbo.Bind();
+        _highlightInstanceVbo.Bind();
 		_highlightInstanceVbo.SetData<float>(instanceData, BufferUsageHint.DynamicDraw);
 
 		_highlightShader!.Use();
@@ -358,44 +372,48 @@ public sealed class Renderer(float cellSize) : IDisposable {
     private void UploadGridToTexture(ICellGrid grid) {
         int w = grid.Width;
         int h = grid.Height;
-        byte[] indices = new byte[w * h];
+        int len = w * h;
+        if (_indexUploadBuffer == null || _indexUploadBuffer.Length < len) {
+            _indexUploadBuffer = new byte[len];
+        }
         var src = grid.CurrentSpan;
         for (int i = 0; i < src.Length; i++) {
-            indices[i] = src[i];
+            _indexUploadBuffer[i] = src[i];
         }
 
-		GCHandle gcHandle = GCHandle.Alloc(indices, GCHandleType.Pinned);
-		try {
-			GL.BindTexture(TextureTarget.Texture2D, _cellIndexTex);
-			// Ensure single-byte row alignment for R8 uploads (default UNPACK_ALIGNMENT=4 would stride incorrectly)
-			GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-			GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, w, h, PixelFormat.Red, PixelType.UnsignedByte, gcHandle.AddrOfPinnedObject());
-			// restore default alignment
-			GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
-		} finally {
-			gcHandle.Free();
-		}
+        GCHandle gcHandle = GCHandle.Alloc(_indexUploadBuffer, GCHandleType.Pinned);
+        try {
+            GL.BindTexture(TextureTarget.Texture2D, _cellIndexTex);
+            // Ensure single-byte row alignment for R8 uploads (default UNPACK_ALIGNMENT=4 would stride incorrectly)
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, w, h, PixelFormat.Red, PixelType.UnsignedByte, gcHandle.AddrOfPinnedObject());
+            // restore default alignment
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+        } finally {
+            gcHandle.Free();
+        }
 
 		// Upload palette texture (1xN) from _speciesPalette. If empty, upload single fallback color.
-		int speciesCount = Math.Max(1, _speciesPalette.Length / 4);
-		byte[] pal = new byte[speciesCount * 4];
-		if (_speciesPalette.Length == 0) {
-			pal[0] = _defaultFallbackColor[0];
-			pal[1] = _defaultFallbackColor[1];
-			pal[2] = _defaultFallbackColor[2];
-			pal[3] = _defaultFallbackColor[3];
-		} else {
-			System.Buffer.BlockCopy(_speciesPalette, 0, pal, 0, pal.Length);
-		}
+        int speciesCount = Math.Max(1, _speciesPalette.Length / 4);
+        int palLen = speciesCount * 4;
+        if (_paletteUploadBuffer == null || _paletteUploadBuffer.Length < palLen) _paletteUploadBuffer = new byte[palLen];
+        if (_speciesPalette.Length == 0) {
+            _paletteUploadBuffer[0] = _defaultFallbackColor[0];
+            _paletteUploadBuffer[1] = _defaultFallbackColor[1];
+            _paletteUploadBuffer[2] = _defaultFallbackColor[2];
+            _paletteUploadBuffer[3] = _defaultFallbackColor[3];
+        } else {
+            System.Buffer.BlockCopy(_speciesPalette, 0, _paletteUploadBuffer, 0, palLen);
+        }
 
-		GCHandle palHandle = GCHandle.Alloc(pal, GCHandleType.Pinned);
-		try {
-			GL.BindTexture(TextureTarget.Texture2D, _paletteTex);
-			// palette is RGBA8 so default unpack alignment (4) is ok
-			GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, speciesCount, 1, PixelFormat.Rgba, PixelType.UnsignedByte, palHandle.AddrOfPinnedObject());
-		} finally {
-			palHandle.Free();
-		}
+        GCHandle palHandle = GCHandle.Alloc(_paletteUploadBuffer, GCHandleType.Pinned);
+        try {
+            GL.BindTexture(TextureTarget.Texture2D, _paletteTex);
+            // palette is RGBA8 so default unpack alignment (4) is ok
+            GL.TexSubImage2D(TextureTarget.Texture2D, 0, 0, 0, speciesCount, 1, PixelFormat.Rgba, PixelType.UnsignedByte, palHandle.AddrOfPinnedObject());
+        } finally {
+            palHandle.Free();
+        }
 	}
 
 	// Update a single cell texel using TexSubImage2D for a 1x1 region.
@@ -408,16 +426,16 @@ public sealed class Renderer(float cellSize) : IDisposable {
 			return;
 
         byte value = grid.CurrentSpan[grid.IndexOf(x, y)];
-		byte[] tmp = new byte[1] { value };
-		GCHandle gcHandle = GCHandle.Alloc(tmp, GCHandleType.Pinned);
-		try {
-			GL.BindTexture(TextureTarget.Texture2D, _cellIndexTex);
-			GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
-			GL.TexSubImage2D(TextureTarget.Texture2D, 0, x, y, 1, 1, PixelFormat.Red, PixelType.UnsignedByte, gcHandle.AddrOfPinnedObject());
-			GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
-		} finally {
-			gcHandle.Free();
-		}
+        _singleByte[0] = value;
+        GCHandle gcHandle = GCHandle.Alloc(_singleByte, GCHandleType.Pinned);
+        try {
+            GL.BindTexture(TextureTarget.Texture2D, _cellIndexTex);
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 1);
+            GL.TexSubImage2D(TextureTarget.Texture2D, 0, x, y, 1, 1, PixelFormat.Red, PixelType.UnsignedByte, gcHandle.AddrOfPinnedObject());
+            GL.PixelStore(PixelStoreParameter.UnpackAlignment, 4);
+        } finally {
+            gcHandle.Free();
+        }
 	}
 
 	private void BuildInstancePositions() {
@@ -493,7 +511,9 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		if (rw <= 0 || rh <= 0)
 			return;
 
-		byte[] indices = new byte[rw * rh];
+        int len = rw * rh;
+        if (_regionUploadBuffer == null || _regionUploadBuffer.Length < len) _regionUploadBuffer = new byte[len];
+        byte[] indices = _regionUploadBuffer;
         var src = grid.CurrentSpan;
 		for (int yy = 0; yy < rh; yy++) {
 			int sy = ry + yy;

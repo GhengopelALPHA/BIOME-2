@@ -98,11 +98,7 @@ public sealed class BiomeApp : GameWindow {
 		// Camera movement now, UI can override input capture.
 		_camera.Update(_input, (float) args.Time);
 
-		// Let input state handle interactions like panning and placement (uses camera, renderer, simulation)
-		_input.HandleInteractions(_camera, _renderer, _simulation);
-
 		// Simulation currently runs only when enabled.
-		// Later, you will add multithread stepping, pause, headless mode, etc.
 		_simulation.Update((float) args.Time);
 
 		_perf.EndUpdate();
@@ -112,6 +108,9 @@ public sealed class BiomeApp : GameWindow {
 		base.OnRenderFrame(args);
 
 		_perf.BeginRender(args.Time);
+
+		// handle interactions like panning and placement (uses camera, renderer, simulation)
+		_input.HandleInteractions(_camera, _renderer, _simulation);
 
 		_renderer.Render(_camera);
 

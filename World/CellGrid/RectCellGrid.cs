@@ -22,17 +22,25 @@ public sealed class RectCellGrid : ICellGrid
     public int Width => _inner.Width;
     public int Height => _inner.Height;
 
-    public byte GetCurrent(int x, int y) => _inner.GetCurrent(x, y);
-    public void SetCurrent(int x, int y, byte value) => _inner.SetCurrent(x, y, value);
-    public void SetNext(int x, int y, byte value) => _inner.SetNext(x, y, value);
-    public void SwapBuffers() => _inner.SwapBuffers();
-    public void CopyCurrentToNext() => _inner.CopyCurrentToNext();
-    public void Clear(byte value = 0) => _inner.Clear(value);
 
-    public ReadOnlySpan<byte> CurrentSpan => _inner.CurrentSpan;
-    public Span<byte> NextSpan => _inner.NextSpan;
-    public int IndexOf(int x, int y) => _inner.IndexOf(x, y);
+	public ReadOnlySpan<byte> CurrentSpan => _inner.CurrentSpan;
+	public Span<byte> NextSpan => _inner.NextSpan;
 
+	public int IndexOf(int x, int y) => _inner.IndexOf(x, y);
+
+	public bool IsValidCell(int x, int y) => x >= 0 && x < _inner.Width && y >= 0 && y < _inner.Height;
+
+	public byte GetCurrent(int x, int y) => _inner.GetCurrent(x, y);
+
+	public void SetCurrent(int x, int y, byte value) => _inner.SetCurrent(x, y, value);
+
+	public void SetNext(int x, int y, byte value) => _inner.SetNext(x, y, value);
+
+	public void SwapBuffers() => _inner.SwapBuffers();
+
+	public void CopyCurrentToNext() => _inner.CopyCurrentToNext();
+
+	public void Clear(byte value = 0) => _inner.Clear(value); 
     public int GetNeighbors(int x, int y, EdgeMode edgeMode, Span<byte> dest) {
         if (dest.Length < 8) throw new ArgumentException("dest must be at least length 8", nameof(dest));
 

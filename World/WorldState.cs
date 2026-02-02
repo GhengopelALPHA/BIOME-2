@@ -211,48 +211,51 @@ public sealed class WorldState {
 	/// This ensures placements are considered by the upcoming swap and next tick.
 	/// </summary>
 	public void ApplyPendingPlacements() {
-		(int Layer, int X, int Y, byte Species)[] explicitSnapshot;
-		(int Layer, int X, int Y)[] requestSnapshot;
 
-		explicitSnapshot = [.. _pendingPlacements];
-		_pendingPlacements.Clear();
+		// Avoid creating large intermediate lists to reduce GC pressure.
+		int layerCount = _layers.Count;
+		if (layerCount == 0) return;
 
-		requestSnapshot = [.. _placementRequests];
-		_placementRequests.Clear();
+		// Per-layer buckets for pending writes
+		var perLayer = new List<(int X, int Y, byte Species)>[layerCount];
 
-		// Resolve lightweight requests into concrete placements using a snapshot of selected indices.
-		int[] selectedSnapshot = _selectedSpeciesIndices.Length == 0 ? [] : (int[]) _selectedSpeciesIndices.Clone();
+		// Snapshot selected species once
+		int[] selectedSnapshot = _selectedSpeciesIndices.Length == 0 ? Array.Empty<int>() : (int[])_selectedSpeciesIndices.Clone();
 		var rnd = Random.Shared;
-		var resolved = new List<(int Layer, int X, int Y, byte Species)>();
 
-		if (requestSnapshot.Length > 0 && selectedSnapshot.Length > 0) {
-			foreach (var (Layer, X, Y) in requestSnapshot) {
-				int choice = selectedSnapshot[rnd.Next(selectedSnapshot.Length)];
-				resolved.Add((Layer, X, Y, (byte) choice));
+		// Move pending entries into per-layer buckets under lock
+		lock (_pendingLock) {
+			for (int i = 0; i < _pendingPlacements.Count; i++) {
+				var p = _pendingPlacements[i];
+				if (p.Layer < 0 || p.Layer >= layerCount) continue;
+				perLayer[p.Layer] ??= new List<(int, int, byte)>();
+				perLayer[p.Layer].Add((p.X, p.Y, p.Species));
 			}
+
+			if (selectedSnapshot.Length > 0) {
+				for (int i = 0; i < _placementRequests.Count; i++) {
+					var r = _placementRequests[i];
+					if (r.Layer < 0 || r.Layer >= layerCount) continue;
+					int choice = selectedSnapshot[rnd.Next(selectedSnapshot.Length)];
+					perLayer[r.Layer] ??= new List<(int, int, byte)>();
+					perLayer[r.Layer].Add((r.X, r.Y, (byte)choice));
+				}
+			}
+
+			_pendingPlacements.Clear();
+			_placementRequests.Clear();
 		}
 
-		// Combine explicit placements and resolved requests
-		var all = new List<(int Layer, int X, int Y, byte Species)>();
-		if (explicitSnapshot.Length > 0)
-			all.AddRange(explicitSnapshot);
-		if (resolved.Count > 0)
-			all.AddRange(resolved);
-
-		if (all.Count == 0)
-			return;
-
-		// Group by layer to minimize CopyCurrentToNext calls
-		var byLayer = all.GroupBy(p => p.Layer);
-		foreach (var g in byLayer) {
-			int li = g.Key;
-			if (li < 0 || li >= _layers.Count)
-				continue;
+		// Apply per-layer batches
+		for (int li = 0; li < layerCount; li++) {
+			var list = perLayer[li];
+			if (list == null || list.Count == 0) continue;
+			if (li < 0 || li >= _layers.Count) continue;
 			var grid = _layers[li].Grid;
-			// Ensure next buffer prepared
-			grid.CopyCurrentToNext();
-			foreach (var p in g) {
-				grid.SetNext(p.X, p.Y, p.Species);
+
+			for (int i = 0; i < list.Count; i++) {
+				var p = list[i];
+				grid.SetCurrent(p.X, p.Y, p.Species);
 			}
 		}
 	}

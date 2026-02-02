@@ -126,7 +126,7 @@ public sealed class InputState {
         // Do not act when UI wants mouse
         if (GuiWantsMouse) return;
 
-        var worldPos = camera.ScreenToWorld(new OpenTK.Mathematics.Vector2(MouseX, MouseY), camera.Zoom);
+        var worldPos = camera.ScreenToWorld(new Vector2(MouseX, MouseY), camera.Zoom);
         float cs = renderer.CellSize;
         int cellX = (int)Math.Floor(worldPos.X / cs);
         int cellY = (int)Math.Floor(worldPos.Y / cs);
@@ -141,9 +141,9 @@ public sealed class InputState {
                 simulation.EnqueuePlacementRequest(cellX, cellY);
 
                 // Request immediate visual update (renderer uses world's current buffer)
-                //renderer.UploadSingleCell(simulation.World.ActiveLayer.Grid, cellX, cellY);
+                renderer.UploadSingleCell(simulation.World.ActiveLayer.Grid, cellX, cellY);
 
-                _lastPlacedX = cellX;
+				_lastPlacedX = cellX;
                 _lastPlacedY = cellY;
                 _placing = true;
             }

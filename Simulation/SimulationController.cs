@@ -49,6 +49,9 @@ public sealed class SimulationController : IDisposable {
 
     public SimulationClock Clock { get; } = new();
 
+    // Reusable thread-local RNG to avoid allocating one each step.
+    private readonly ThreadLocal<Random> _threadLocalRand;
+
     /// <summary>
     /// Restart the world to the initial state but with explicit width/height.
     /// If a last-applied WorldModel exists, it will be re-applied with the
@@ -130,6 +133,9 @@ public sealed class SimulationController : IDisposable {
         _cts = new CancellationTokenSource();
         _bgTask = Task.Run(() => BackgroundLoop(_cts.Token));
 
+        // Create the thread-local RNG once to reduce per-step allocations.
+        _threadLocalRand = new ThreadLocal<Random>(() => new Random(Random.Shared.Next()));
+
         // TODO: create default species and rules for Conway's Game of Life
     }
 
@@ -146,6 +152,9 @@ public sealed class SimulationController : IDisposable {
 		// Run as fast as possible when not paused. Respect DelayTime as an optional extra pause per-step.
 		try {
 			while (!token.IsCancellationRequested) {
+				// Apply any pending manual placements queued by the UI into the next buffers now that they are prepared.
+				_world.ApplyPendingPlacements();
+
 				if (Clock.Paused) {
 					await Task.Delay(1, token).ConfigureAwait(false);
 					continue;
@@ -244,56 +253,50 @@ public sealed class SimulationController : IDisposable {
 	}
 
 	private void StepOnce() {
-		// Only prepare and process layers that have rules.
-		var layersToProcess = _layersWithRules.Count > 0 ? [.. _layersWithRules] : Array.Empty<int>();
-
         // Prepare next buffers only for layers that will be processed.
-        foreach (int li in layersToProcess) {
+        foreach (int li in _layersWithRules) {
             _world.Layers[li].Grid.CopyCurrentToNext();
         }
 
-        // Apply any pending manual placements queued by the UI into the next buffers now that they are prepared.
-        _world.ApplyPendingPlacements();
+        // Use reusable thread-local RNG to avoid allocating one each step.
+        var threadLocalRand = _threadLocalRand;
 
-        // Thread-local RNG to avoid contention and repeated seeds
-        var threadLocalRand = new ThreadLocal<Random>(() => new Random(Random.Shared.Next()));
-
-        Parallel.ForEach(layersToProcess, layerIndex => {
+        // Process layers sequentially to avoid nested Parallel scheduling across layers.
+        foreach (int layerIndex in _layersWithRules) {
             var layer = _world.Layers[layerIndex];
             var grid = layer.Grid;
             var rand = threadLocalRand.Value!;
-			int total = grid.Width * grid.Height;
+            int total = grid.Width * grid.Height;
 
-			Parallel.For(0, total, idx => {
-				var rand = threadLocalRand.Value!;
-				int y = idx / grid.Width;
-				int x = idx % grid.Width;
-				byte originValue = grid.GetCurrent(x, y);
+            // Parallelize across cells within the layer.
+            Parallel.For(0, total, idx => {
+                var rand = threadLocalRand.Value!;
+                int y = idx / grid.Width;
+                int x = idx % grid.Width;
+                if (!grid.IsValidCell(x, y)) return; // skip invalid positions for sparse topologies
+                byte originValue = grid.GetCurrent(x, y);
 
-				if (_ruleIndex.TryGetValue((layerIndex, originValue), out var candidates)) {
-					foreach (var rule in candidates) {
+                if (_ruleIndex.TryGetValue((layerIndex, originValue), out var candidates)) {
+                    foreach (var rule in candidates) {
+                        bool allReactantsMatch = CheckAllReactantsMatch(layer, y, x, rule);
+                        if (allReactantsMatch) {
+                            if (rule.NewSpeciesIndex >= 0) {
+                                if (rule.Probability >= 1.0 || rand.NextDouble() < rule.Probability) {
+                                    if (rule.LayerIndex == layerIndex) {
+                                        layer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
+                                    } else {
+                                        var targetLayer = _world.Layers[rule.LayerIndex];
+                                        targetLayer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
+                                    }
 
-						bool allReactantsMatch = CheckAllReactantsMatch(layer, y, x, rule);
-						if (allReactantsMatch) {
-							if (rule.NewSpeciesIndex >= 0) {
-								if (rule.Probability >= 1.0 || rand.NextDouble() < rule.Probability) {
-									if (rule.LayerIndex == layerIndex) {
-										layer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
-									} else {
-										var targetLayer = _world.Layers[rule.LayerIndex];
-										targetLayer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
-									}
-
-									rule.IncrementOpCount();
-								}
-							}
-						}
-					}
-				}
-			});
-		});
-
-        threadLocalRand.Dispose();
+                                    rule.IncrementOpCount();
+                                }
+                            }
+                        }
+                    }
+                }
+            });
+        }
 
 		// Swap buffers after all rules evaluated
 		foreach (var layer in _world.Layers) {

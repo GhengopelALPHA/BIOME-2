@@ -14,20 +14,30 @@ public interface ICellGrid
     int Width { get; }
     int Height { get; }
 
-    byte GetCurrent(int x, int y);
+	// Helpful low-level access for renderer texture uploads
+	ReadOnlySpan<byte> CurrentSpan { get; }
+	Span<byte> NextSpan { get; }
+
+	int IndexOf(int x, int y);
+
+	/// <summary>
+	/// Returns true when the logical coordinate (x,y) refers to a valid cell in this grid.
+	/// For rectangular grids this is true for 0..Width-1,0..Height-1. For other topologies
+	/// this allows sparse layouts (e.g., Disk) to indicate invalid coordinates.
+	/// </summary>
+	bool IsValidCell(int x, int y);
+
+	byte GetCurrent(int x, int y);
+
     void SetCurrent(int x, int y, byte value);
+
     void SetNext(int x, int y, byte value);
 
     void SwapBuffers();
+
     void CopyCurrentToNext();
 
     void Clear(byte value = 0);
-
-    // Helpful low-level access for renderer texture uploads
-    ReadOnlySpan<byte> CurrentSpan { get; }
-    Span<byte> NextSpan { get; }
-    int IndexOf(int x, int y);
-
     /// <summary>
     /// Populate the provided span with neighbor cell values for the logical neighbors
     /// of the cell at (x,y). Returns the number of neighbors written.

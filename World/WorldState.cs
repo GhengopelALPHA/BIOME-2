@@ -4,6 +4,8 @@ using System.Linq;
 using OpenTK.Mathematics;
 using Biome2.FileLoading.Models;
 
+using Biome2.World.CellGrid;
+
 namespace Biome2.World;
 
 /// <summary>
@@ -54,7 +56,9 @@ public sealed class WorldState {
     // defined, an empty array is provided.
     public event Action<byte[]>? SpeciesPaletteChanged;
 
-    public WorldState(int widthCells, int heightCells, int layerCount) {
+    public GridTopologies.GridTopology GridTopology { get; }
+
+    public WorldState(int widthCells, int heightCells, int layerCount, GridTopologies.GridTopology topology = GridTopologies.GridTopology.RECT) {
 		// bound checking
 		var _widthCells = widthCells;
 		var _heightCells = heightCells;
@@ -73,18 +77,19 @@ public sealed class WorldState {
 			_layerCount = 1;
 		}
 
-		WidthCells = _widthCells;
-		HeightCells = _heightCells;
-		LayerCount = _layerCount;
+        WidthCells = _widthCells;
+        HeightCells = _heightCells;
+        LayerCount = _layerCount;
+		GridTopology = topology;
 
 		CreateLayers();
 	}
 
-	private void CreateLayers() {
-		for (int i = 0; i < LayerCount; i++) {
-			_layers.Add(new WorldLayer($"Layer {i}", WidthCells, HeightCells));
-		}
-	}
+    private void CreateLayers() {
+        for (int i = 0; i < LayerCount; i++) {
+            _layers.Add(new WorldLayer($"Layer {i}", WidthCells, HeightCells, GridTopology));
+        }
+    }
 
     public static WorldState CreateBlank() {
         return new WorldState(

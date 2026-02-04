@@ -26,6 +26,10 @@ public sealed class DiskCellGrid : ICellGrid
         _ringCounts = ComputeRingCounts(_rings, _outerCount);
     }
 
+    // Expose helper properties used by renderer to build logical coords list
+    public int RingsCount => _rings;
+    public int RingCountAt(int ring) => (ring >= 0 && ring < _rings) ? _ringCounts[ring] : 0;
+
     private static int[] ComputeRingCounts(int rings, int outerCount)
     {
         var arr = new int[rings];
@@ -207,7 +211,8 @@ public sealed class DiskCellGrid : ICellGrid
     }
 
     /// <summary>
-    /// Produce instance data for rendering or placement helpers. Each Vector4 contains (worldX, worldY, ring, pos).
+    /// Produce instance data for rendering or placement helpers. Each Vector4 contains (worldX, worldY, angle, pad).
+    /// Cell logical coords (ring,pos) should be passed separately to the renderer.
     /// </summary>
     public Vector4[] GetInstanceData(float cellSize)
     {
@@ -222,7 +227,11 @@ public sealed class DiskCellGrid : ICellGrid
                 double angle = (2.0 * Math.PI) * ((double)p / cnt);
                 float wx = center.X + (float)(radius * Math.Cos(angle));
                 float wy = center.Y + (float)(radius * Math.Sin(angle));
-                list.Add(new Vector4(wx, wy, r, p));
+                // translate so center is at origin
+                wx -= center.X;
+                wy -= center.Y;
+                // z = angle (radians), w = ring count for this radius
+                list.Add(new Vector4(wx, wy, (float)angle, (float)cnt));
             }
         }
         return list.ToArray();

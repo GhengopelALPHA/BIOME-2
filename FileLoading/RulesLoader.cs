@@ -3,6 +3,7 @@ using System.IO;
 using System.Collections.Generic;
 using Biome2.Diagnostics;
 using Biome2.FileLoading.Models;
+using static Biome2.World.CellGrid.GridTopologies;
 
 namespace Biome2.FileLoading;
 
@@ -146,12 +147,13 @@ public sealed class RulesLoader {
 
                     // reactants are separated by spaces
                     var tokens = reactStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
-                    // e.g. +, 1FIRE2+ or SIMULATOR:COLOR1
+                    // e.g. +, -, 1FIRE2+ or SIMULATOR:COLOR1
+                    bool pendingExclusion = false;
                     foreach (var tok in tokens) {
-                        if (tok == "+")
-                            continue;
+                        if (tok == "+") { pendingExclusion = false; continue; }
+                        if (tok == "-") { pendingExclusion = true; continue; }
 
-                        // determine sign from trailing + or -
+                        // determine sign from trailing + or - (this is different from a leading '-' token)
                         int sign = 0;
                         if (tok.EndsWith('+')) sign = 1;
                         else if (tok.EndsWith('-')) sign = -1;
@@ -166,11 +168,14 @@ public sealed class RulesLoader {
                         if (idx > 0) {
                             if (!int.TryParse(core.AsSpan(0, idx), out count)) {
                                 LogLineParseError($"Invalid reactant count '{core[..idx]}'", core[..idx]);
+                                // reset pending exclusion and skip
+                                pendingExclusion = false;
                                 continue;
                             }
                             // validate count
                             if (count < 0) {
                                 LogLineParseError($"Reactant count must be positive, got '{count}'", core[..idx]);
+                                pendingExclusion = false;
                                 continue;
                             } else if (count > 8) {
                                 LogLineParseError($"Reactant count too large for given RANGE, got '{count}'", core[..idx]); // TODO: RANGE setting
@@ -189,10 +194,29 @@ public sealed class RulesLoader {
 
                         if (string.IsNullOrEmpty(speciesName)) {
                             LogLineParseError("Invalid reactant (missing species name)", core);
+                            pendingExclusion = false;
                             continue;
                         }
 
-                        list.Add(new ReactantModel(speciesName, reactLayer, count, sign));
+                        // If an exclusion prefix ('-') was present, validate that it's compatible
+                        bool exclusion = false;
+                        if (pendingExclusion) {
+                            // Exclusionary reactants currently do not support explicit counts or trailing signs
+                            if (count != 0) {
+                                LogLineParseError($"Exclusionary reactant does not support counts '{core}'", core);
+                                pendingExclusion = false;
+                                continue;
+                            }
+                            if (sign != 0) {
+                                LogLineParseError($"Exclusionary reactant does not support trailing '+' or '-' modifiers '{core}'", core);
+                                pendingExclusion = false;
+                                continue;
+                            }
+                            exclusion = true;
+                        }
+
+                        list.Add(new ReactantModel(speciesName, reactLayer, count, sign, exclusion));
+                        pendingExclusion = false;
                     }
                     reactants = [.. list];
                 }
@@ -218,10 +242,17 @@ public sealed class RulesLoader {
         int w = 0, h = 0;
         bool paused = false;
         var edgesMode = EdgeMode.BORDER;
+        var gridTopology = GridTopology.RECT;
         if (settings.TryGetValue("WIDTH", out var ws))
 			_=int.TryParse(ws, out w);
         if (settings.TryGetValue("HEIGHT", out var hs))
 			_=int.TryParse(hs, out h);
+        if (settings.TryGetValue("SHAPE", out var shape)) {
+            if (!string.IsNullOrEmpty(shape) && string.Equals(shape.Trim(), "SPIRAL", StringComparison.OrdinalIgnoreCase)) {
+                gridTopology = GridTopology.SPIRAL;
+                Logger.Info("Using SPIRAL grid topology as per SHAPE setting.");
+			}
+        }
         if (settings.TryGetValue("PAUSE", out var ps))
             paused = ps != "0";
         if (settings.TryGetValue("EDGES", out var es)) {
@@ -238,7 +269,8 @@ public sealed class RulesLoader {
             species: species,
             layers: layers,
             rules: rules,
-            edges: edgesMode
+            edges: edgesMode,
+            topology: gridTopology
         );
 
         return final;

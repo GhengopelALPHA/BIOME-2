@@ -70,8 +70,9 @@ public sealed class SimulationController : IDisposable {
                 species: _lastWorldModel.Species,
                 layers: _lastWorldModel.Layers,
                 rules: _lastWorldModel.Rules,
-                edges: _lastWorldModel.Edges
-            );
+                edges: _lastWorldModel.Edges,
+                topology: _lastWorldModel.GridTopology
+			);
 
             ApplyRules(req);
             return;
@@ -191,8 +192,9 @@ public sealed class SimulationController : IDisposable {
         int newHeight = worldModel.Height > 0 ? worldModel.Height : Math.Max(1, _world.HeightCells);
         int newLayerCount = (worldModel.Layers != null && worldModel.Layers.Count > 0) ? worldModel.Layers.Count : Math.Max(1, _world.LayerCount);
 
-        // Construct new runtime world state.
-        var newWorld = new WorldState(newWidth, newHeight, newLayerCount);
+        // Construct new runtime world state using requested topology.
+        var topology = worldModel.GridTopology;
+        var newWorld = new WorldState(newWidth, newHeight, newLayerCount, topology);
 
         // Preserve previously selected active layer index where possible so the view
         // remains on the same layer after applying new rules (unless the new world
@@ -253,8 +255,8 @@ public sealed class SimulationController : IDisposable {
 	}
 
 	private void StepOnce() {
-        // Prepare next buffers only for layers that will be processed.
-        foreach (int li in _layersWithRules) {
+        // Prepare next buffers. All layers need to be processed or else they won't capture manual additions correctly
+        for (int li = 0; li < _world.Layers.Count; li++) {
             _world.Layers[li].Grid.CopyCurrentToNext();
         }
 
@@ -330,8 +332,13 @@ public sealed class SimulationController : IDisposable {
 				// Bounds check for same-coordinate access
 				if (x < 0 || x >= targetGrid.Width || y < 0 || y >= targetGrid.Height) { allReactantsMatch = false; break; }
 
-				byte v = targetGrid.GetCurrent(x, y);
-				if (v != react.SpeciesIndex) { allReactantsMatch = false; break; }
+                byte v = targetGrid.GetCurrent(x, y);
+                if (react.Exclusion) {
+                    // Exclusionary exact-layer reactant: must NOT be the specified species
+                    if (v == react.SpeciesIndex) { allReactantsMatch = false; break; }
+                } else {
+                    if (v != react.SpeciesIndex) { allReactantsMatch = false; break; }
+                }
 				// For exact-layer reactants, Count/Sign semantics are treated as == by design when referencing a single cell.
 				continue;
             } else {

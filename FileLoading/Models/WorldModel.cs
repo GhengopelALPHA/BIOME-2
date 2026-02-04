@@ -40,8 +40,9 @@ public sealed class WorldModel {
         IReadOnlyList<SpeciesModel> species,
         IReadOnlyList<string> layers,
         IReadOnlyList<RulesModel> rules,
-        EdgeMode edges = EdgeMode.BORDER
-    ) {
+        EdgeMode edges = EdgeMode.BORDER,
+        GridTopology topology = GridTopology.RECT
+	) {
         Width = width;
         Height = height;
         Paused = paused;
@@ -49,5 +50,6 @@ public sealed class WorldModel {
         Layers = layers ?? [];
         Rules = rules ?? [];
         Edges = edges;
-    }
+        GridTopology = topology;
+	}
 }

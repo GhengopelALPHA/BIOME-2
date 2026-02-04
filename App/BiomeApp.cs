@@ -92,6 +92,8 @@ public sealed class BiomeApp : GameWindow {
 
 		_input.UpdateFrom(this);
 
+		_input.ProcessInputs(_camera, _world);
+
 		// Update UI input state so it can request capture of mouse/keyboard.
 		_ui?.UpdateInputState(_input);
 

@@ -57,7 +57,11 @@ public static class RuleSetBuilder {
                     continue;
                 }
 
-				simReactants.Add(new SimulationReactantModel(sidx, lidx, r.Count, r.Sign));
+                // Exclusionary reactants are allowed and were parsed by the loader.
+                // Propagate the flag to the simulation reactant and validate
+                // incompatible combinations (count or sign with exclusion should
+                // have been rejected by the loader already).
+                simReactants.Add(new SimulationReactantModel(sidx, lidx, r.Count, r.Sign, r.Exclusion));
             }
 
             var sr = new SimulationRuleModel(layerIdx, originIdx, simReactants, newIdx, fr.Probability, fr.VerboseRule) {

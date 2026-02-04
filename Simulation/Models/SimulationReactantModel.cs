@@ -6,17 +6,19 @@ namespace Biome2.Simulation.Models;
 /// Simulation-side reactant representation with resolved indices ready for fast checks.
 /// </summary>
 public sealed class SimulationReactantModel(
-	int speciesIndex,
-	int layerIndex,
-	int count,
-	int sign
+    int speciesIndex,
+    int layerIndex,
+    int count,
+    int sign,
+    bool exclusion = false
 ) {
 	public int SpeciesIndex { get; } = speciesIndex;
 	public int LayerIndex { get; } = layerIndex;
 	public int Count { get; } = count;
 	public int Sign { get; } = sign;
+    public bool Exclusion { get; } = exclusion;
 
-	public bool Check(ReadOnlySpan<byte> neighbors) {
+    public bool Check(ReadOnlySpan<byte> neighbors) {
         if (SpeciesIndex < 0) return false;
         int speciesCount = 0;
         for (int i = 0; i < neighbors.Length; i++) {

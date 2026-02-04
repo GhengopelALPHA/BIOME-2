@@ -2,6 +2,8 @@
 using OpenTK.Windowing.GraphicsLibraryFramework;
 using OpenTK.Mathematics;
 using static Biome2.Input.PlacementModes;
+using Biome2.Graphics;
+using Biome2.World;
 
 namespace Biome2.Input;
 
@@ -24,6 +26,7 @@ public sealed class InputState {
 	public bool KeyA { get; private set; }
 	public bool KeyS { get; private set; }
 	public bool KeyD { get; private set; }
+	public bool KeyQ { get; private set; }
 
 	public bool KeyShift { get; private set; }
 	public bool KeyCtrl { get; private set; }
@@ -219,9 +222,21 @@ public sealed class InputState {
         KeyA = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.A);
         KeyS = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.S);
         KeyD = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.D);
+        
+        KeyQ = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.Q);
 
         KeyShift = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftShift) || keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightShift);
         KeyCtrl = keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.LeftControl) || keyboard.IsKeyDown(OpenTK.Windowing.GraphicsLibraryFramework.Keys.RightControl);
+	}
+
+	/// <summary>
+	/// Method to unify world and camera within inputs so that we can update world
+	/// settings and camera state with keybinds (TODO: could move WASD controls here).
+	/// </summary>
+	public void ProcessInputs(Camera camera, WorldState world) {
+        if (KeyQ)
+            camera.FrameWorld(world.WidthCells, world.HeightCells);
+
 	}
 
 	// Called by ImGuiController to set capture flags.

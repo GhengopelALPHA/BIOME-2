@@ -6,31 +6,68 @@ using System.Threading.Tasks;
 
 namespace Biome2.Graphics;
 internal static class Shaders {
-	public const string GridVertex = @"
+public const string GridVertex = @"
 #version 450 core
 
 layout(location = 0) in vec2 aLocalPos;
-layout(location = 1) in vec2 aInstancePos;
+layout(location = 1) in vec4 aInstance; // xy = origin, z = angle, w = pad
+layout(location = 2) in vec2 aCellCoord; // integer cell coords (cellX, cellY)
 
 uniform mat4 uViewProj;
 uniform float uCellSize;
 uniform vec2 uGridSize;
+uniform int uUseTrapezoid;
 
 out vec2 vCellUv;
 flat out ivec2 vCellCoord;
 
 void main()
 {
-    // Local quad scaled to cell size.
-    vec2 worldPos = aInstancePos + (aLocalPos * uCellSize);
+    // Choose trapezoid or regular quad behavior based on topology flag.
+    if (uUseTrapezoid == 1) {
+        // Compute trapezoid local coordinates where y is radial (inner->outer) and x is tangential.
+        // Rotate clockwise by 90 degrees so short side faces inward correctly.
+        float angle = aInstance.z - 1.57079632679; // -PI/2
+        float t = aLocalPos.y; // 0..1 from inner to outer
+        // trapezoid width and ratio supplied as uniforms
+        
+        // Compute tangential half-width based on angular spacing so adjacent cells touch seamlessly.
+        // aInstance.w contains the ring's cell count (cnt). Compute arc length per cell = 2*pi*radius / cnt.
+        float radius = length(aInstance.xy);
+        
+        // radial length decreases with radius to generate extra padding near center
+        float radialPad = uCellSize * (0.5 + 0.5 * exp(-radius / (uCellSize * 4.0)));
+        radius += radialPad;
+        float cnt = max(1.0, aInstance.w);
+        float arc = 3.14159265359 * max(radius, 1e-6) / cnt;
+        float arcInner = 3.14159265359 * max(radius - uCellSize, 1e-6) / cnt;
+        // Choose outer half-width so that tangential span ~ arc * 0.5
+        float halfOuter = max(1, arc);
+        float halfInner = min(halfOuter, arcInner);
+        float halfWidth = mix(halfInner, halfOuter, t);
 
-    // vCellUv is used to draw border lines in fragment shader.
-    vCellUv = aLocalPos;
-    // Compute integer cell coordinate and pass to fragment shader without interpolation.
-    ivec2 cell = ivec2(floor(aInstancePos / uCellSize + vec2(0.5)));
-    vCellCoord = cell;
+        float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
+        
+        float yLocal = (aLocalPos.y - 0.5) + radialPad;
 
-    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+        // rotate local by angle and translate by instance origin
+        float ca = cos(angle);
+        float sa = sin(angle);
+        vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
+
+        // vCellUv is used to draw border lines in fragment shader.
+        vCellUv = aLocalPos;
+        // use provided integer cell coordinates from separate attribute
+        vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
+
+        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+    } else {
+        // Regular axis-aligned quad. Interpret aInstance.xy as origin.
+        vec2 worldPos = aInstance.xy + (aLocalPos * uCellSize);
+        vCellUv = aLocalPos;
+        vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
+        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+    }
 }";
 
 	public const string GridFragment = @"

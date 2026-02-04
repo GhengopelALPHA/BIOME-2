@@ -33,6 +33,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 	private BufferObject? _highlightInstanceVbo = null;
 	private VertexArrayObject _axisVao = null!;
 	private BufferObject _axisVbo = null!;
+	private BufferObject _instanceCellCoordVbo = null!;
 
     private WorldState _world = null!;
 
@@ -45,6 +46,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 	private int _uCellIndices;
 	private int _uPalette;
 	private int _uSpeciesCount;
+    private int _uUseTrapezoid;
 
 	// Highlight shader uniforms
 	private int _uHViewProj;
@@ -59,7 +61,8 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 	// Controls for rendering options
 	public bool ShowGrid { get; set; } = false;
-	public bool ShowAxes { get; set; } = true;
+	public bool ShowAxes { get; set; } = false;
+
 
     // When false, renderer will skip drawing; useful for pausing visual updates while
     // leaving simulation state intact. Default = true (drawing enabled).
@@ -172,6 +175,8 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		_uPalette = _shader.GetUniformLocation("uPalette");
 		_uSpeciesCount = _shader.GetUniformLocation("uSpeciesCount");
 
+		_uUseTrapezoid = _shader.GetUniformLocation("uUseTrapezoid");
+
 		_vao = new VertexArrayObject();
 		_vao.Bind();
 
@@ -187,16 +192,26 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		GL.EnableVertexAttribArray(0);
 		GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
 
-		// Instance positions, one per cell.
-		_instanceVbo = new BufferObject(BufferTarget.ArrayBuffer);
+        // Instance VBO will contain per-instance attributes. We'll use two attributes:
+        // attrib 1 (vec4): origin.x, origin.y, angle, pad
+        // attrib 2 (vec2): cellX, cellY (logical coords)
+        _instanceVbo = new BufferObject(BufferTarget.ArrayBuffer);
 
-		// IMPORTANT: bind the instance VBO before setting the vertex attrib pointer
-		// so the VAO records the correct buffer binding for attribute 1.
-		_instanceVbo.Bind();
+        // IMPORTANT: bind the instance VBO before setting the vertex attrib pointer
+        // so the VAO records the correct buffer binding for attribute 1.
+        _instanceVbo.Bind();
 
-		GL.EnableVertexAttribArray(1);
-		GL.VertexAttribPointer(1, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
-		GL.VertexAttribDivisor(1, 1);
+        GL.EnableVertexAttribArray(1);
+        GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, sizeof(float) * 4, 0);
+        GL.VertexAttribDivisor(1, 1);
+
+        // We'll bind a second attribute from a separate VBO for cell coords.
+        // Create a small VBO for the logical coords (vec2 per instance).
+        _instanceCellCoordVbo = new BufferObject(BufferTarget.ArrayBuffer);
+        _instanceCellCoordVbo.Bind();
+        GL.EnableVertexAttribArray(2);
+        GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
+        GL.VertexAttribDivisor(2, 1);
 
 		// Axis shader and buffers (lines from origin along +X and +Y)
 		_axisShader = new ShaderProgram(Shaders.AxisVertex, Shaders.AxisFragment);
@@ -294,6 +309,9 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		GL.UniformMatrix4(_uViewProj, false, ref viewProj);
 
 		GL.Uniform1(_uCellSize, _cellSize);
+
+		GL.Uniform1(_uUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+		
 		GL.Uniform2(_uGridSize, new Vector2(_world.WidthCells, _world.HeightCells));
 
 		// Grid control uniforms
@@ -439,21 +457,61 @@ public sealed class Renderer(float cellSize) : IDisposable {
 	}
 
 	private void BuildInstancePositions() {
-		// This is a simple flat list of cell origins.
-		// Later, you will replace this with chunked rendering for huge worlds,
-		// and possibly a GPU generated instance buffer.
-		int w = _world.WidthCells;
-		int h = _world.HeightCells;
+		// Support topology-aware instance positions. For rectangular grids we emit
+		// one instance per x,y cell. For Disk topology we request instance data
+		// from the grid which provides world-space positions per valid cell.
+        // We'll build two arrays: one for vec4 instance attribute (origin.x, origin.y, angle, pad)
+        // and one for vec2 logical cell coords (cellX, cellY).
+        var grid = _world.ActiveLayer.Grid;
+        var instances = new List<float>();
+        var cellCoords = new List<float>();
+        if (grid is DiskCellGrid disk) {
+            var inst = disk.GetInstanceData(_cellSize);
+            _instancePositions = new Vector2[inst.Length];
+            for (int i = 0; i < inst.Length; i++) {
+                _instancePositions[i] = new Vector2(inst[i].X, inst[i].Y);
+                instances.Add(inst[i].X);
+                instances.Add(inst[i].Y);
+                instances.Add(inst[i].Z); // angle
+                instances.Add(inst[i].W); // pad
+                // logical coords: ring = ? we must recompute counts array mapping
+                // DiskCellGrid does not currently expose per-instance logical coords; compute them here by enumerating rings again
+                // We'll use a helper mapping: for each ring r, positions p=0..cnt-1 emitted in same order as GetInstanceData
+                // So we can reconstruct ring and p by iterating in same nested loops.
+                // To avoid redoing logic, the DiskCellGrid should ideally return both, but for now we will compute below.
+            }
+            // Build logical coords by iterating rings again
+            for (int r = 0; r < disk.RingsCount; r++) {
+                int cnt = disk.RingCountAt(r);
+                for (int p = 0; p < cnt; p++) {
+                    cellCoords.Add(r);
+                    cellCoords.Add(p);
+                }
+            }
+        } else {
+            int w = _world.WidthCells;
+            int h = _world.HeightCells;
+            _instancePositions = new Vector2[w * h];
+            int idx = 0;
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    var px = x * _cellSize;
+                    var py = y * _cellSize;
+                    _instancePositions[idx++] = new Vector2(px, py);
+                    instances.Add(px);
+                    instances.Add(py);
+                    instances.Add(0f); // angle unused
+                    instances.Add(0f);
+                    cellCoords.Add(x);
+                    cellCoords.Add(y);
+                }
+            }
+        }
 
-		_instancePositions = new Vector2[w * h];
-
-		int idx = 0;
-		for (int y = 0; y < h; y++)
-			for (int x = 0; x < w; x++) {
-				_instancePositions[idx++] = new Vector2(x * _cellSize, y * _cellSize);
-			}
-
-		_instanceVbo.SetData<Vector2>(_instancePositions, BufferUsageHint.StaticDraw);
+        // Upload as floats
+        _instanceVbo.SetData<float>(instances.ToArray(), BufferUsageHint.StaticDraw);
+        _instanceCellCoordVbo.Bind();
+        _instanceCellCoordVbo.SetData<float>(cellCoords.ToArray(), BufferUsageHint.StaticDraw);
 	}
 
 	private void BuildAxisBuffer() {
@@ -461,15 +519,28 @@ public sealed class Renderer(float cellSize) : IDisposable {
 			return;
 
 		// Origin at (0,0). Endpoints along positive axes in world space.
-		float maxX = _world.WidthCells * _cellSize;
-		float maxY = _world.HeightCells * _cellSize;
+		float maxX = 0f;
+		float maxY = 0f;
+		if (_instancePositions != null && _instancePositions.Length > 0) {
+			for (int i = 0; i < _instancePositions.Length; i++) {
+				var p = _instancePositions[i];
+				if (p.X > maxX) maxX = p.X;
+				if (p.Y > maxY) maxY = p.Y;
+			}
+			// extend to cover one cell
+			maxX += _cellSize;
+			maxY += _cellSize;
+		} else {
+			maxX = _world.WidthCells * _cellSize;
+			maxY = _world.HeightCells * _cellSize;
+		}
 
-        Vector2[] pts = [
+		Vector2[] pts = [
             new(0, 0), // origin
             new(maxX, 0), // +X
             new(0, 0), // origin
             new(0, maxY), // +Y
-        ];
+		];
 
 		_axisVbo.SetData<Vector2>(pts, BufferUsageHint.StaticDraw);
 	}

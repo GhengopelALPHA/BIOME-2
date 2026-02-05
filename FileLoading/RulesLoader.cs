@@ -98,7 +98,7 @@ public sealed class RulesLoader {
                 }
             } else if (section == 2) {
                 // layers: currently expect lines like "DISCRETE NAME"
-                var parts = readLine.Split(' ', StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
+                var parts = readLine.Split((char[])null, StringSplitOptions.TrimEntries | StringSplitOptions.RemoveEmptyEntries);
                 if (parts.Length >= 2 && string.Equals(parts[0], "DISCRETE", StringComparison.OrdinalIgnoreCase)) {
                     layers.Add(parts[1]);
                 } else {
@@ -111,6 +111,85 @@ public sealed class RulesLoader {
                 if (arrow <= 0) { LogLineParseError("Invalid rule (missing '->')", readLine); continue; }
                 var left = readLine[..arrow].Trim();
                 var right = readLine[(arrow + 2)..].Trim();
+
+                // left: optional coordinate limits then layer:origin [reactants]
+                // Coordinate limits may be parenthesized like "(0:60,40:90)" or as a simple prefix "0:30"
+                int? xMin = null, xMax = null, yMin = null, yMax = null;
+
+                // Helper to parse a single axis spec like "0:60" or ":30" or "40:"
+                static bool TryParseAxis(string spec, out int? aMin, out int? aMax) {
+                    aMin = null; aMax = null;
+                    if (string.IsNullOrWhiteSpace(spec)) return true;
+                    var parts = spec.Split(':', 2);
+                    if (parts.Length != 2) return false;
+                    var smin = parts[0].Trim();
+                    var smax = parts[1].Trim();
+                    if (smin.Length > 0) {
+                        if (int.TryParse(smin, out var vmin)) aMin = vmin;
+                        else return false;
+                    }
+                    if (smax.Length > 0) {
+                        if (int.TryParse(smax, out var vmax)) aMax = vmax;
+                        else return false;
+                    }
+                    return true;
+                }
+
+                // Detect parenthesized coords at start
+                var leftTrim = left.TrimStart();
+                if (leftTrim.StartsWith("(") ) {
+                    int end = leftTrim.IndexOf(')');
+                    if (end > 0) {
+                        var coords = leftTrim.Substring(1, end - 1).Trim();
+                        left = leftTrim.Substring(end + 1).TrimStart();
+                        // split into x,y by comma
+                        var parts = coords.Split(',', 2);
+                        if (parts.Length >= 1) {
+                            var xspec = parts[0].Trim();
+                            if (!string.IsNullOrEmpty(xspec)) {
+                                if (!TryParseAxis(xspec, out xMin, out xMax)) {
+                                    LogLineParseError($"Invalid coordinate spec '{xspec}'", xspec);
+                                    xMin = xMax = null;
+                                }
+                            }
+                        }
+                        if (parts.Length == 2) {
+                            var yspec = parts[1].Trim();
+                            if (!string.IsNullOrEmpty(yspec)) {
+                                if (!TryParseAxis(yspec, out yMin, out yMax)) {
+                                    LogLineParseError($"Invalid coordinate spec '{yspec}'", yspec);
+                                    yMin = yMax = null;
+                                }
+                            }
+                        }
+                    }
+                } else {
+                    // Check for simple prefix token before first space
+                    var firstSpace = left.IndexOf(' ');
+                    string firstTok = firstSpace >= 0 ? left[..firstSpace] : left;
+                    // Heuristic: treat as coord token when it contains ':' and has no letters
+                    bool hasColon = firstTok.Contains(':');
+                    bool hasLetter = false;
+                    foreach (var ch in firstTok) if (char.IsLetter(ch)) { hasLetter = true; break; }
+                    if (hasColon && !hasLetter) {
+                        // consume token
+                        left = (firstSpace >= 0) ? left.Substring(firstTok.Length).TrimStart() : string.Empty;
+                        // token may contain comma separating x and y
+                        var parts = firstTok.Split(',', 2);
+                        if (parts.Length >= 1) {
+                            if (!TryParseAxis(parts[0].Trim(), out xMin, out xMax)) {
+                                LogLineParseError($"Invalid coordinate spec '{parts[0]}'", parts[0]);
+                                xMin = xMax = null;
+                            }
+                        }
+                        if (parts.Length == 2) {
+                            if (!TryParseAxis(parts[1].Trim(), out yMin, out yMax)) {
+                                LogLineParseError($"Invalid coordinate spec '{parts[1]}'", parts[1]);
+                                yMin = yMax = null;
+                            }
+                        }
+                    }
+                }
 
                 // left: layer:origin [reactants]
                 var colon = left.IndexOf(':');
@@ -132,7 +211,7 @@ public sealed class RulesLoader {
                 }
 
                 // origin species is first token until whitespace or operator
-                var originParts = remainder.Split(' ', 2, StringSplitOptions.TrimEntries);
+                var originParts = remainder.Split((char[])null, 2, StringSplitOptions.TrimEntries);
                 if (originParts.Length == 0 || string.IsNullOrEmpty(originParts[0])) {
                     LogLineParseError("Missing origin species", remainder);
                     continue;
@@ -145,8 +224,8 @@ public sealed class RulesLoader {
                     var reactStr = originParts[1].Trim();
                     var list = new List<ReactantModel>();
 
-                    // reactants are separated by spaces
-                    var tokens = reactStr.Split(' ', StringSplitOptions.RemoveEmptyEntries);
+                    // reactants are separated by whitespace (space, tabs, etc.)
+                    var tokens = reactStr.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
                     // e.g. +, -, 1FIRE2+ or SIMULATOR:COLOR1
                     bool pendingExclusion = false;
                     foreach (var tok in tokens) {
@@ -234,7 +313,7 @@ public sealed class RulesLoader {
                     }
                 }
 
-                rules.Add(new RulesModel(layerName, originSpecies, reactants, newSpec, prob, _currentRawLine));
+                rules.Add(new RulesModel(layerName, originSpecies, reactants, newSpec, prob, _currentRawLine, xMin, xMax, yMin, yMax));
             }
         }
 

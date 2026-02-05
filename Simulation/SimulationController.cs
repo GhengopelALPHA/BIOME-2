@@ -280,6 +280,12 @@ public sealed class SimulationController : IDisposable {
 
                 if (_ruleIndex.TryGetValue((layerIndex, originValue), out var candidates)) {
                     foreach (var rule in candidates) {
+                        // If rule has coordinate limits, skip when current cell is outside them.
+                        if (rule.XMin.HasValue && x < rule.XMin.Value) continue;
+                        if (rule.XMax.HasValue && x > rule.XMax.Value) continue;
+                        if (rule.YMin.HasValue && y < rule.YMin.Value) continue;
+                        if (rule.YMax.HasValue && y > rule.YMax.Value) continue;
+
                         bool allReactantsMatch = CheckAllReactantsMatch(layer, y, x, rule);
                         if (allReactantsMatch) {
                             if (rule.NewSpeciesIndex >= 0) {

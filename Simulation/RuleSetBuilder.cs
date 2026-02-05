@@ -64,9 +64,18 @@ public static class RuleSetBuilder {
                 simReactants.Add(new SimulationReactantModel(sidx, lidx, r.Count, r.Sign, r.Exclusion));
             }
 
-            var sr = new SimulationRuleModel(layerIdx, originIdx, simReactants, newIdx, fr.Probability, fr.VerboseRule) {
-                VerboseRule = fr.VerboseRule
-            };
+            var sr = new SimulationRuleModel(
+				layerIdx,
+				originIdx,
+				simReactants,
+				newIdx,
+				fr.Probability,
+				fr.VerboseRule,
+				fr.XMin,
+				fr.XMax,
+				fr.YMin,
+				fr.YMax
+            );
             simRules.Add(sr);
 
             var key = (layerIdx, originIdx);

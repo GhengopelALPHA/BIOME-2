@@ -33,10 +33,19 @@ public static class RuleSetBuilder {
             int newIdx = world.GetSpeciesIndex(fr.NewSpeciesName);
             if (newIdx < 0) { warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - unknown new species '{fr.NewSpeciesName}'"); continue; }
 
-            if (newIdx == originIdx) {
-                warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - new species is the same as origin species '{fr.NewSpeciesName}'");
-                continue;
+
+            // Move metadata resolution: if the file specified a move operation, resolve mover species to index
+            int moveSpeciesIdx = -1;
+            if (!string.IsNullOrEmpty(fr.MoveSpeciesName)) {
+                moveSpeciesIdx = world.GetSpeciesIndex(fr.MoveSpeciesName);
+                if (moveSpeciesIdx < 0)
+                    warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - unknown move species '{fr.MoveSpeciesName}'");
             }
+
+			if (newIdx == originIdx && moveSpeciesIdx == -1) {
+				warnings.Add($"RULE WARNING: {fr.VerboseRule}\t\t - new species is the same as origin species '{fr.NewSpeciesName}'");
+				continue;
+			}
 
 			var simReactants = new List<SimulationReactantModel>();
             foreach (var r in fr.Reactants) {
@@ -65,17 +74,19 @@ public static class RuleSetBuilder {
             }
 
             var sr = new SimulationRuleModel(
-				layerIdx,
-				originIdx,
-				simReactants,
-				newIdx,
-				fr.Probability,
-				fr.VerboseRule,
-				fr.XMin,
-				fr.XMax,
-				fr.YMin,
-				fr.YMax
+                layerIdx,
+                originIdx,
+                simReactants,
+                newIdx,
+                fr.Probability,
+                fr.VerboseRule,
+                fr.XMin,
+                fr.XMax,
+                fr.YMin,
+                fr.YMax,
+                moveSpeciesIdx
             );
+
             simRules.Add(sr);
 
             var key = (layerIdx, originIdx);

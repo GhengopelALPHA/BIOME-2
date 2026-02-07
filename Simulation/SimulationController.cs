@@ -52,6 +52,15 @@ public sealed class SimulationController : IDisposable {
     // Reusable thread-local RNG to avoid allocating one each step.
     private readonly ThreadLocal<Random> _threadLocalRand;
 
+    // Lightweight struct for move intents (declared at class scope to avoid local-type restrictions)
+    private readonly struct MoveIntent {
+        public readonly int Sx, Sy, Dx, Dy, SrcResult;
+        public readonly byte Species;
+        public MoveIntent(int sx, int sy, int dx, int dy, byte species, int srcResult) {
+            Sx = sx; Sy = sy; Dx = dx; Dy = dy; Species = species; SrcResult = srcResult;
+        }
+    }
+
     /// <summary>
     /// Restart the world to the initial state but with explicit width/height.
     /// If a last-applied WorldModel exists, it will be re-applied with the
@@ -270,6 +279,13 @@ public sealed class SimulationController : IDisposable {
             var rand = threadLocalRand.Value!;
             int total = grid.Width * grid.Height;
 
+            // Per-layer mark-phase intent buffers. Use a fast-path for single intents to avoid
+            // allocating a List for the common case where only one intent is produced per cell.
+            var intentSingles = new System.Collections.Concurrent.ConcurrentBag<MoveIntent>();
+            var intentLists = new System.Collections.Concurrent.ConcurrentBag<System.Collections.Generic.List<MoveIntent>>();
+
+            // (MoveIntent struct is declared at class scope.)
+
             // Parallelize across cells within the layer.
             Parallel.For(0, total, idx => {
                 var rand = threadLocalRand.Value!;
@@ -277,8 +293,16 @@ public sealed class SimulationController : IDisposable {
                 int x = idx % grid.Width;
                 if (!grid.IsValidCell(x, y)) return; // skip invalid positions for sparse topologies
                 byte originValue = grid.GetCurrent(x, y);
+                // Local state for produced intents. Fast-path for single intent avoids allocating a List.
+                MoveIntent singleIntent = default;
+                bool hasSingleIntent = false;
+                System.Collections.Generic.List<MoveIntent>? localIntents = null;
 
                 if (_ruleIndex.TryGetValue((layerIndex, originValue), out var candidates)) {
+                    // Allocate neighbor and candidate buffers once per cell iteration (safer and reduces repeated stackallocs).
+                    Span<int> nx = stackalloc int[8];
+                    Span<int> ny = stackalloc int[8];
+                    Span<int> cand = stackalloc int[8];
                     foreach (var rule in candidates) {
                         // If rule has coordinate limits, skip when current cell is outside them.
                         if (rule.XMin.HasValue && x < rule.XMin.Value) continue;
@@ -287,23 +311,122 @@ public sealed class SimulationController : IDisposable {
                         if (rule.YMax.HasValue && y > rule.YMax.Value) continue;
 
                         bool allReactantsMatch = CheckAllReactantsMatch(layer, y, x, rule);
-                        if (allReactantsMatch) {
-                            if (rule.NewSpeciesIndex >= 0) {
-                                if (rule.Probability >= 1.0 || rand.NextDouble() < rule.Probability) {
-                                    if (rule.LayerIndex == layerIndex) {
-                                        layer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
-                                    } else {
-                                        var targetLayer = _world.Layers[rule.LayerIndex];
-                                        targetLayer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
-                                    }
+                        if (!allReactantsMatch) continue;
 
-                                    rule.IncrementOpCount();
+                        if (rule.MoveSpeciesIndex >= 0) {
+                            // Try to recruit an adjacent mover of the specified species into (x,y)
+                            // Gather neighbor coords and pick uniformly at random among valid candidates.
+                            int written = grid.GetNeighborCoordinates(x, y, _edgeMode, nx, ny);
+                            int ci = 0;
+                            for (int ni = 0; ni < written; ni++) {
+                                int cx = nx[ni];
+                                int cy = ny[ni];
+                                if (cx < 0 || cy < 0) continue;
+                                if (!grid.IsValidCell(cx, cy)) continue;
+                                var v = grid.GetCurrent(cx, cy);
+                                if (v == rule.MoveSpeciesIndex) cand[ci++] = ni;
+                            }
+
+                            if (ci > 0) {
+                                // Apply move probability at mark time
+                                if (rule.Probability >= 1.0 || rand.NextDouble() < rule.Probability) {
+                                    int pick = cand[rand.Next(ci)];
+                                    int sx = nx[pick];
+                                    int sy = ny[pick];
+									// srcResult: what the source cell should become after moving.
+									// Use explicit NewSpeciesIndex when provided; otherwise default to the rule's origin species.
+									int srcResult = rule.NewSpeciesIndex >= 0 ? rule.NewSpeciesIndex : rule.OriginSpeciesIndex;
+                                    if (!hasSingleIntent && localIntents == null) {
+                                        // store as single intent
+                                        singleIntent = new MoveIntent(sx, sy, x, y, (byte)rule.MoveSpeciesIndex, srcResult);
+                                        hasSingleIntent = true;
+                                    } else {
+                                        if (localIntents == null) {
+                                            localIntents = new System.Collections.Generic.List<MoveIntent>(2);
+                                            if (hasSingleIntent) {
+                                                localIntents.Add(singleIntent);
+                                                hasSingleIntent = false;
+                                            }
+                                        }
+                                        localIntents.Add(new MoveIntent(sx, sy, x, y, (byte)rule.MoveSpeciesIndex, srcResult));
+                                    }
+                                    rule.IncrementOpCount();								}
+                            }
+                            // Move-style rules should NOT fall through to the standard replacement behavior.
+                            // If no mover was found or the move probability check failed, the rule simply does nothing.
+                            continue;
+                        }
+
+                        // Non-move replacement behavior
+                        if (rule.NewSpeciesIndex >= 0) {
+                            if (rule.Probability >= 1.0 || rand.NextDouble() < rule.Probability) {
+                                if (rule.LayerIndex == layerIndex) {
+                                    layer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
+                                } else {
+                                    var targetLayer = _world.Layers[rule.LayerIndex];
+                                    targetLayer.Grid.SetNext(x, y, (byte) rule.NewSpeciesIndex);
                                 }
+
+                                rule.IncrementOpCount();
                             }
                         }
                     }
                 }
+
+                if (localIntents != null) intentLists.Add(localIntents);
+                else if (hasSingleIntent) intentSingles.Add(singleIntent);
             });
+
+            // Commit phase: collect intents and resolve conflicts (randomly choose one per destination)
+            // Build a dictionary keyed by destination index
+            var destMap = new Dictionary<int, System.Collections.Generic.List<MoveIntent>>();
+            foreach (var list in intentLists) {
+                foreach (var it in list) {
+                    int dIdx = it.Dx + it.Dy * grid.Width;
+                    if (!destMap.TryGetValue(dIdx, out var l)) { l = new System.Collections.Generic.List<MoveIntent>(); destMap[dIdx] = l; }
+                    l.Add(it);
+                }
+            }
+            // Include single-intent fast-path entries
+            foreach (var s in intentSingles) {
+                int dIdx = s.Dx + s.Dy * grid.Width;
+                if (!destMap.TryGetValue(dIdx, out var l)) { l = new System.Collections.Generic.List<MoveIntent>(); destMap[dIdx] = l; }
+                l.Add(s);
+            }
+
+            // For each destination pick one candidate at random and apply move.
+            // Ensure each source cell is used at most once (no duplication).
+            var destKeys = destMap.Keys.ToList();
+            // Shuffle destination processing order to keep fairness
+            for (int i = destKeys.Count - 1; i > 0; i--) {
+                int j = rand.Next(i + 1);
+                var tmp = destKeys[i]; destKeys[i] = destKeys[j]; destKeys[j] = tmp;
+            }
+
+            var usedSources = new HashSet<int>();
+            foreach (var dIdx in destKeys) {
+                var dlist = destMap[dIdx];
+                if (dlist.Count == 0) continue;
+
+                // Filter out candidates whose source is already used
+                var available = new System.Collections.Generic.List<MoveIntent>();
+                foreach (var c in dlist) {
+                    int sIdx = c.Sx + c.Sy * grid.Width;
+                    if (!usedSources.Contains(sIdx)) available.Add(c);
+                }
+
+                if (available.Count == 0) continue;
+
+                var chosen = available[rand.Next(available.Count)];
+                int dx = dIdx % grid.Width;
+                int dy = dIdx / grid.Width;
+                // set destination next and clear source next
+                grid.SetNext(dx, dy, chosen.Species);
+                // set source to configured srcResult
+                grid.SetNext(chosen.Sx, chosen.Sy, (byte)chosen.SrcResult);
+
+                usedSources.Add(chosen.Sx + chosen.Sy * grid.Width);
+            }
         }
 
 		// Swap buffers after all rules evaluated

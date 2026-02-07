@@ -18,7 +18,8 @@ public class RulesModel(
     int? xMin = null,
     int? xMax = null,
     int? yMin = null,
-    int? yMax = null
+    int? yMax = null,
+    string moveSpeciesName = ""
 ) {
 	// Names are stored (layer and species names) so the loader can map to indices later
 	public string LayerName { get; } = layerName ?? string.Empty;
@@ -35,5 +36,10 @@ public class RulesModel(
 	public int? XMax { get; } = xMax;
 	public int? YMin { get; } = yMin;
 	public int? YMax { get; } = yMax;
+
+    // Movement rule metadata: if not empty, this rule will attempt to recruit an adjacent mover
+    // (moveSpeciesName) into the destination. moveProbability is the probability used
+    // when creating a move intent.
+    public string MoveSpeciesName { get; } = moveSpeciesName ?? string.Empty;
 
 }

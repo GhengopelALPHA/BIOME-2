@@ -17,13 +17,16 @@ public sealed class SimulationRuleModel(
     int? xMin = null,
     int? xMax = null,
     int? yMin = null,
-    int? yMax = null
+    int? yMax = null,
+    int moveSpeciesIndex = -1
 ) {
     public int LayerIndex { get; } = layerIndex;
     public int OriginSpeciesIndex { get; } = originSpeciesIndex;
     public List<SimulationReactantModel> Reactants { get; } = reactants ?? [];
     public int NewSpeciesIndex { get; } = newSpeciesIndex;
     public double Probability { get; } = probability;
+    // Movement metadata
+    public int MoveSpeciesIndex { get; } = moveSpeciesIndex;
 
     // Optional inclusive coordinate limits for this rule. Null means unbounded.
     public int? XMin { get; } = xMin;

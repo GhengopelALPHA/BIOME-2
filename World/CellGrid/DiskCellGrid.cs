@@ -256,4 +256,27 @@ public sealed class DiskCellGrid : ICellGrid
         if (p < 0) p += cnt;
         return (r, p);
     }
+
+    // Provide a simple neighbor coordinates implementation by calling GetNeighbors and mapping back to coords.
+    public int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY)
+    {
+        // Reuse GetNeighbors to determine which neighbors are valid and then compute coords in row-major of backing store.
+        Span<byte> vals = stackalloc byte[8];
+        int written = GetNeighbors(x, y, edgeMode, vals);
+        int ni = 0;
+        for (int i = 0; i < written; i++) {
+            // Map index i to offset
+            int ox = (i % 3) - 1;
+            int oy = (i / 3) - 1;
+            int nx = x + ox;
+            int ny = y + oy;
+            if (nx < 0 || nx >= Width || ny < 0 || ny >= Height) {
+                destX[ni] = -1; destY[ni] = -1;
+            } else {
+                destX[ni] = nx; destY[ni] = ny;
+            }
+            ni++;
+        }
+        return ni;
+    }
 }

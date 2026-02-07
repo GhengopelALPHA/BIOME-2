@@ -105,12 +105,23 @@ public sealed class RulesLoader {
                     LogLineParseError("Invalid layer definition (expected 'DISCRETE NAME')", readLine);
                 }
             } else {
-                // rules section. parse basic form layer:origin [reactants] -> new*prob
-                // Example: FOREST:OLD + 1FIRE2+ -> FIRE1*0.1
-                var arrow = readLine.IndexOf("->", StringComparison.Ordinal);
-                if (arrow <= 0) { LogLineParseError("Invalid rule (missing '->')", readLine); continue; }
-                var left = readLine[..arrow].Trim();
-                var right = readLine[(arrow + 2)..].Trim();
+                // rules section. two possible forms:
+                // - standard: layer:origin [reactants] -> NEW*prob
+                // - move: layer:origin [reactants including a single-count mover] >> NEW*prob
+                // Example move: LEVEL:FIELD + 1RED >> RED*0.125
+                int moveOp = readLine.IndexOf(">>", StringComparison.Ordinal);
+                bool isMoveLine = moveOp >= 0;
+                string left;
+                string right;
+                if (isMoveLine) {
+                    left = readLine[..moveOp].Trim();
+                    right = readLine[(moveOp + 2)..].Trim();
+                } else {
+                    var arrow = readLine.IndexOf("->", StringComparison.Ordinal);
+                    if (arrow <= 0) { LogLineParseError("Invalid rule (missing '->' or '>>')", readLine); continue; }
+                    left = readLine[..arrow].Trim();
+                    right = readLine[(arrow + 2)..].Trim();
+                }
 
                 // left: optional coordinate limits then layer:origin [reactants]
                 // Coordinate limits may be parenthesized like "(0:60,40:90)" or as a simple prefix "0:30"
@@ -188,6 +199,57 @@ public sealed class RulesLoader {
                                 yMin = yMax = null;
                             }
                         }
+                    }
+                }
+
+                // Detect optional move operator '>>' on the left side (between origin/reactants and right side)
+                // Format: DEST [reactants] >> MOVERSPEC*prob -> SRCRESULT
+                // Parse robustly by tokenizing so '>>' is not accidentally treated as a reactant token.
+                var moveSpeciesName = string.Empty;
+
+                var leftTokens = left.Split((char[])null, StringSplitOptions.RemoveEmptyEntries);
+                int moveTokIndex = -1;
+                for (int ti = 0; ti < leftTokens.Length; ti++) {
+                    var t = leftTokens[ti];
+                    if (t == ">>") { moveTokIndex = ti; break; }
+                    int p = t.IndexOf(">>", StringComparison.Ordinal);
+                    if (p >= 0) { moveTokIndex = ti; break; }
+                }
+
+                if (moveTokIndex >= 0) {
+                    // Build destPart from tokens before the operator and movePart from the remainder
+                    string destPart;
+                    string movePart;
+                    var opTok = leftTokens[moveTokIndex];
+                    if (opTok == ">>") {
+                        destPart = string.Join(' ', leftTokens, 0, moveTokIndex).Trim();
+                        movePart = string.Join(' ', leftTokens, moveTokIndex + 1, leftTokens.Length - (moveTokIndex + 1)).Trim();
+                    } else {
+                        // operator is embedded in token like "1RED>>RED*0.1"
+                        var tok = opTok;
+                        var p = tok.IndexOf(">>", StringComparison.Ordinal);
+                        var before = tok.Substring(0, p);
+                        var after = tok.Substring(p + 2);
+                        var beforeList = new System.Collections.Generic.List<string>();
+                        if (moveTokIndex > 0) beforeList.AddRange(leftTokens[..moveTokIndex]);
+                        if (!string.IsNullOrEmpty(before)) beforeList.Add(before);
+                        destPart = string.Join(' ', beforeList).Trim();
+
+                        var afterList = new System.Collections.Generic.List<string>();
+                        if (!string.IsNullOrEmpty(after)) afterList.Add(after);
+                        if (moveTokIndex + 1 < leftTokens.Length) afterList.AddRange(leftTokens[(moveTokIndex + 1)..]);
+                        movePart = string.Join(' ', afterList).Trim();
+                    }
+
+                    left = destPart;
+
+                    // movePart may include a mover species and optional '*prob' suffix
+                    var starIdx = movePart.IndexOf('*');
+                    if (starIdx >= 0) {
+                        moveSpeciesName = movePart[..starIdx].Trim();
+                        // probability parsing will be handled from the right side (rightSide -> prob)
+                    } else {
+                        moveSpeciesName = movePart;
                     }
                 }
 
@@ -297,23 +359,99 @@ public sealed class RulesLoader {
                         list.Add(new ReactantModel(speciesName, reactLayer, count, sign, exclusion));
                         pendingExclusion = false;
                     }
-                    reactants = [.. list];
-                }
+                    // Merge compatible reactants of the same species and layer to simplify simulation checks.
+                    // Group by (layer, species)
+                    var groups = new Dictionary<(string layer, string species), List<ReactantModel>>();
+                    foreach (var r in list) {
+                        var key = (layer: r.LayerName ?? string.Empty, species: r.SpeciesName ?? string.Empty);
+                        if (!groups.TryGetValue(key, out var g)) { g = new List<ReactantModel>(); groups[key] = g; }
+                        g.Add(r);
+                    }
 
-                // right side: newSpecies * probability
+                    var merged = new List<ReactantModel>();
+                    foreach (var kv in groups) {
+                        var key = kv.Key;
+                        var g = kv.Value;
+
+                        if (g.Count == 1) { merged.Add(g[0]); continue; }
+
+                        // Check for exclusion conflicts: if any exclusion and others present, warn and keep originals
+                        bool hasExclusion = g.Exists(r => r.Exclusion);
+                        if (hasExclusion) {
+                            Logger.Warn($"RULE WARNING: {_currentRawLine}\t\t - conflicting exclusion reactants for species '{key.species}' in layer '{key.layer}'; entries not merged.");
+                            merged.AddRange(g);
+                            continue;
+                        }
+
+                        // Check for conflicting non-zero signs (+ vs -)
+                        bool hasPlus = g.Exists(r => r.Sign > 0);
+                        bool hasMinus = g.Exists(r => r.Sign < 0);
+                        if (hasPlus && hasMinus) {
+                            Logger.Warn($"RULE WARNING: {_currentRawLine}\t\t - conflicting reactant signs for species '{key.species}' in layer '{key.layer}' (both '+' and '-') ; entries not merged.");
+                            merged.AddRange(g);
+                            continue;
+                        }
+
+                        // Determine resulting sign: prefer any non-zero sign; neutral (0) merges into the non-zero sign if present
+                        int resultSign = 0;
+                        foreach (var r in g) { if (r.Sign != 0) { resultSign = r.Sign; break; } }
+
+                        // Sum counts
+                        int totalCount = 0;
+                        foreach (var r in g) totalCount += r.Count;
+
+                        merged.Add(new ReactantModel(key.species, key.layer, totalCount, resultSign, false));
+
+                        Logger.Info($"Merged {g.Count} reactants for species '{key.species}' in layer '{key.layer}' into '{totalCount}{(resultSign>0?"+":resultSign<0?"-":"")}' for rule: {_currentRawLine}");
+                    }
+
+                    reactants = merged.ToArray();
+                }
+                var rightSide = right;
+                // right side: newSpecies * probability (standard replacement behavior)
                 var prob = 1.0;
-                var newSpec = right;
-                var star = right.IndexOf('*');
+                var newSpec = rightSide;
+                var star = rightSide.IndexOf('*');
                 if (star >= 0) {
-                    newSpec = right[..star].Trim();
-                    var probStr = right[(star + 1)..].Trim();
+                    newSpec = rightSide[..star].Trim();
+                    var probStr = rightSide[(star + 1)..].Trim();
                     if (!double.TryParse(probStr, out prob)) {
                         LogLineParseError($"Invalid probability '{probStr}'", probStr);
                         prob = 1.0;
                     }
                 }
 
-                rules.Add(new RulesModel(layerName, originSpecies, reactants, newSpec, prob, _currentRawLine, xMin, xMax, yMin, yMax));
+                // If this was a move-style line (uses '>>'), the move species must be provided
+                // as a single-count reactant on the left. Extract and remove it from reactants
+                // and treat the parsed probability as the move probability. The backfill
+                // (source result) will not have its own probability.
+                if (isMoveLine) {
+                    string found = string.Empty;
+                    // Prefer the last single-count non-exclusion reactant when multiple are present
+                    int foundIndex = -1;
+                    for (int ri = reactants.Length - 1; ri >= 0; ri--) {
+                        var r = reactants[ri];
+                        if (!string.IsNullOrEmpty(r.SpeciesName) && r.Count == 1 && !r.Exclusion) {
+                            found = r.SpeciesName;
+                            foundIndex = ri;
+                            break;
+                        }
+                    }
+                    if (foundIndex >= 0) {
+                        var tmp = new List<ReactantModel>(reactants);
+                        tmp.RemoveAt(foundIndex);
+                        reactants = tmp.ToArray();
+                    }
+                    if (string.IsNullOrEmpty(found)) {
+                        LogLineParseError($"Invalid move rule (expected a single-count mover reactant before '>>')", left);
+                    } else {
+                        moveSpeciesName = found;
+                        // For move-style rules, `prob` parsed from the right side is the move probability.
+                        // The backfill species (newSpec) does not have a probability.
+                    }
+                }
+
+                rules.Add(new RulesModel(layerName, originSpecies, reactants, newSpec, prob, _currentRawLine, xMin, xMax, yMin, yMax, moveSpeciesName));
             }
         }
 

@@ -47,4 +47,11 @@ public interface ICellGrid
     /// whether to use an actual neighbor value or a backup sentinel value.
     /// </summary>
     int GetNeighbors(int x, int y, EdgeMode edgeMode, Span<byte> dest);
+
+    /// <summary>
+    /// Populate the provided spans with neighbor coordinates (X and Y) using the same ordering
+    /// as GetNeighbors. destX/destY must be at least length 8. Returns number of coordinates written.
+    /// Invalid/out-of-range neighbors will be written as (-1,-1).
+    /// </summary>
+    int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY);
 }

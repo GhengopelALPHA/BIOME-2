@@ -81,6 +81,7 @@ uniform int uShowGrid;
 uniform float uPixelsPerUnit;
 uniform float uGridThicknessPx;
 uniform float uCellSize;
+uniform vec2 uGridSize;
 uniform sampler2D uCellIndices; // R8 texture containing species indices per cell (normalized)
 uniform sampler2D uPalette;     // 1xN RGBA palette texture
 uniform int uSpeciesCount;
@@ -100,8 +101,40 @@ void main()
 
     // If grid is disabled, output the texel color directly so adjacent
     // cells with the same color render contiguously (no seams).
+    // Compute a thin world-edge overlay (1-pixel) that draws a light-grey
+    // line around the outermost cells. This should be visible regardless of
+    // whether grid lines are shown.
+    float uvPixel = (1.0 / max(uPixelsPerUnit, 0.0001)) / max(uCellSize, 0.0005);
+    float edgeFade = clamp(uvPixel * 0.5, 1e-6, 0.5);
+
+    // Edge thickness in world units corresponding to ~1 screen pixel
+    float edgeWorldUnits = (1.0 / max(uPixelsPerUnit, 0.01));
+    float edgeNormalized = edgeWorldUnits / max(uCellSize, 0.0001);
+
+    int gridW = int(uGridSize.x + 0.5);
+    int gridH = int(uGridSize.y + 0.5);
+
+    float leftMask = 0.0;
+    float rightMask = 0.0;
+    float downMask = 0.0;
+    float upMask = 0.0;
+    if (gridW > 0) {
+        if (coord.x == 0) leftMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, vCellUv.x);
+        if (coord.x == gridW - 1) rightMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, 1.0 - vCellUv.x);
+    }
+    if (gridH > 0) {
+        if (coord.y == 0) downMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, vCellUv.y);
+        if (coord.y == gridH - 1) upMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, 1.0 - vCellUv.y);
+    }
+
+    float borderMask = max(max(leftMask, rightMask), max(downMask, upMask));
+    vec3 worldBorderColor = vec3(0.5, 0.5, 0.5);
+
     if (uShowGrid == 0) {
-        fragColor = texColor;
+        // Even when grid lines are disabled, overlay the world border.
+        vec3 base = texColor.rgb;
+        vec3 outColor = mix(worldBorderColor, base, 1.0 - borderMask);
+        fragColor = vec4(outColor, texColor.a);
         return;
     }
 
@@ -111,9 +144,8 @@ void main()
     inset = clamp(inset, 0.0, 0.1);
 
     // Anti-aliasing fade expressed in UV coordinates (approx. half a screen
-    // pixel converted into cell-local UV space).
-    float uvPixel = (1.0 / max(uPixelsPerUnit, 0.0001)) / max(uCellSize, 0.0005);
-    float fade = clamp(uvPixel * 0.5, 1e-6, 0.5);
+    // pixel converted into cell-local UV space). Reuse edgeFade computed above.
+    float fade = edgeFade;
 
     float left = smoothstep(inset - fade, inset + fade, vCellUv.x);
     float right = smoothstep(inset - fade, inset + fade, 1.0 - vCellUv.x);
@@ -125,7 +157,10 @@ void main()
     vec3 borderColor = vec3(0.0, 0.0, 0.0);
     vec3 color = mix(borderColor, texColor.rgb, interior);
 
-    fragColor = vec4(color, texColor.a);
+    // Overlay world border (light grey) on top of the cell color.
+    vec3 finalColor = mix(worldBorderColor, color, 1.0 - borderMask);
+
+    fragColor = vec4(finalColor, texColor.a);
 }
 ";
 

@@ -36,6 +36,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 	private BufferObject _instanceCellCoordVbo = null!;
 
     private WorldState _world = null!;
+    public WorldState World => _world;
 
 	private int _uViewProj;
 	private int _uCellSize;
@@ -47,10 +48,13 @@ public sealed class Renderer(float cellSize) : IDisposable {
 	private int _uPalette;
 	private int _uSpeciesCount;
     private int _uUseTrapezoid;
+	private int _uDiskCenter;
 
 	// Highlight shader uniforms
 	private int _uHViewProj;
 	private int _uHCellSize;
+	private int _uHUseTrapezoid;
+	private int _uHDiskCenter;
 	private int _uHTime;
 	private int _uHPixelsPerUnit;
 	private int _uHBorderThicknessPx;
@@ -108,15 +112,24 @@ public sealed class Renderer(float cellSize) : IDisposable {
         // Reuse preallocated array to avoid allocations
         float[] instanceData = _highlightInstanceData;
 
-		if (input.GetPlacementMode() == PlacementMode.Pixel || !input.IsPlacing()) {
-			if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
-                instanceCount = 1;
-                instanceData[0] = hoverX * _cellSize;
-                instanceData[1] = hoverY * _cellSize;
-                instanceData[2] = 1.0f;
-                instanceData[3] = 1.0f;
-			}
-		} else {
+			if (input.GetPlacementMode() == PlacementMode.Pixel || !input.IsPlacing()) {
+				if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
+					instanceCount = 1;
+					// If disk topology, request world-centered instance data from the disk grid so highlight matches rendering
+					if (_world.ActiveLayer?.Grid is DiskCellGrid disk && _world.GridTopology == GridTopologies.GridTopology.SPIRAL) {
+						var inst = disk.GetCellWorldPosition(hoverX, hoverY, _cellSize);
+						instanceData[0] = inst.X;
+						instanceData[1] = inst.Y;
+						instanceData[2] = inst.Z;
+						instanceData[3] = inst.W;
+					} else {
+						instanceData[0] = hoverX * _cellSize;
+						instanceData[1] = hoverY * _cellSize;
+						instanceData[2] = 1.0f;
+						instanceData[3] = 1.0f;
+					}
+				}
+			} else {
 			var start = input.GetPlacementStart();
 			int sx = start.X;
 			int sy = start.Y;
@@ -147,6 +160,15 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		var viewProj = camera.GetViewProjection();
 		GL.UniformMatrix4(_uHViewProj, false, ref viewProj);
 		GL.Uniform1(_uHCellSize, _cellSize);
+		GL.Uniform1(_uHUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+		// pass disk center for highlight calculations
+			if (_world.ActiveLayer?.Grid is DiskCellGrid diskGrid) {
+				var dc = diskGrid.GetBackingGridCenter(_cellSize);
+				GL.Uniform2(_uHDiskCenter, ref dc);
+			} else {
+				Vector2 diskCenter = new Vector2(((_world.WidthCells - 1) * _cellSize) * 0.5f, ((_world.HeightCells - 1) * _cellSize) * 0.5f);
+				GL.Uniform2(_uHDiskCenter, ref diskCenter);
+			}
 		GL.Uniform1(_uHTime, (float)DateTime.Now.TimeOfDay.TotalSeconds);
 		GL.Uniform1(_uHPixelsPerUnit, camera.Zoom);
 		GL.Uniform1(_uHBorderThicknessPx, 2.0f);
@@ -176,6 +198,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		_uSpeciesCount = _shader.GetUniformLocation("uSpeciesCount");
 
 		_uUseTrapezoid = _shader.GetUniformLocation("uUseTrapezoid");
+		_uDiskCenter = _shader.GetUniformLocation("uDiskCenter");
 
 		_vao = new VertexArrayObject();
 		_vao.Bind();
@@ -221,6 +244,8 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 		_uHViewProj = _highlightShader.GetUniformLocation("uViewProj");
 		_uHCellSize = _highlightShader.GetUniformLocation("uCellSize");
+		_uHUseTrapezoid = _highlightShader.GetUniformLocation("uUseTrapezoid");
+		_uHDiskCenter = _highlightShader.GetUniformLocation("uDiskCenter");
 		_uHTime = _highlightShader.GetUniformLocation("uTime");
 		_uHPixelsPerUnit = _highlightShader.GetUniformLocation("uPixelsPerUnit");
 		_uHBorderThicknessPx = _highlightShader.GetUniformLocation("uBorderThicknessPx");
@@ -311,6 +336,16 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		GL.Uniform1(_uCellSize, _cellSize);
 
 		GL.Uniform1(_uUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+		// disk center in world coordinates (backing-grid centered)
+		if (_world.ActiveLayer?.Grid is DiskCellGrid disk) {
+			var dc = disk.GetBackingGridCenter(_cellSize);
+			GL.Uniform2(_uDiskCenter, ref dc);
+			GL.Uniform2(_uHDiskCenter, ref dc);
+		} else {
+			Vector2 diskCenter = new Vector2(((_world.WidthCells - 1) * _cellSize) * 0.5f, ((_world.HeightCells - 1) * _cellSize) * 0.5f);
+			GL.Uniform2(_uDiskCenter, ref diskCenter);
+			GL.Uniform2(_uHDiskCenter, ref diskCenter);
+		}
 		
 		GL.Uniform2(_uGridSize, new Vector2(_world.WidthCells, _world.HeightCells));
 
@@ -469,6 +504,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
             var inst = disk.GetInstanceData(_cellSize);
             _instancePositions = new Vector2[inst.Length];
             for (int i = 0; i < inst.Length; i++) {
+                // instance positions returned by disk are now centered around origin
                 _instancePositions[i] = new Vector2(inst[i].X, inst[i].Y);
                 instances.Add(inst[i].X);
                 instances.Add(inst[i].Y);
@@ -521,28 +557,56 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		// Origin at (0,0). Endpoints along positive axes in world space.
 		float maxX = 0f;
 		float maxY = 0f;
-		if (_instancePositions != null && _instancePositions.Length > 0) {
-			for (int i = 0; i < _instancePositions.Length; i++) {
-				var p = _instancePositions[i];
-				if (p.X > maxX) maxX = p.X;
-				if (p.Y > maxY) maxY = p.Y;
-			}
-			// extend to cover one cell
-			maxX += _cellSize;
-			maxY += _cellSize;
-		} else {
-			maxX = _world.WidthCells * _cellSize;
-			maxY = _world.HeightCells * _cellSize;
-		}
+        Vector2[] pts;
+        if (_instancePositions != null && _instancePositions.Length > 0) {
+            // If disk topology, compute extents relative to disk center
+            if (_world.GridTopology == GridTopologies.GridTopology.SPIRAL && _world.ActiveLayer?.Grid is DiskCellGrid disk) {
+                Vector2 center = disk.GetBackingGridCenter(_cellSize);
+                float maxRelX = 0f;
+                float maxRelY = 0f;
+                for (int i = 0; i < _instancePositions.Length; i++) {
+                    var p = _instancePositions[i];
+                    float rx = Math.Abs(p.X - center.X);
+                    float ry = Math.Abs(p.Y - center.Y);
+                    if (rx > maxRelX) maxRelX = rx;
+                    if (ry > maxRelY) maxRelY = ry;
+                }
+                maxRelX += _cellSize;
+                maxRelY += _cellSize;
+                pts = new Vector2[] {
+                    new Vector2(center.X, center.Y),
+                    new Vector2(center.X + maxRelX, center.Y),
+                    new Vector2(center.X, center.Y),
+                    new Vector2(center.X, center.Y + maxRelY),
+                };
+            } else {
+                for (int i = 0; i < _instancePositions.Length; i++) {
+                    var p = _instancePositions[i];
+                    if (p.X > maxX) maxX = p.X;
+                    if (p.Y > maxY) maxY = p.Y;
+                }
+                // extend to cover one cell
+                maxX += _cellSize;
+                maxY += _cellSize;
+                pts = new Vector2[] {
+                    new Vector2(0, 0), // origin
+                    new Vector2(maxX, 0), // +X
+                    new Vector2(0, 0), // origin
+                    new Vector2(0, maxY), // +Y
+                };
+            }
+        } else {
+            maxX = _world.WidthCells * _cellSize;
+            maxY = _world.HeightCells * _cellSize;
+            pts = new Vector2[] {
+                new Vector2(0, 0), // origin
+                new Vector2(maxX, 0), // +X
+                new Vector2(0, 0), // origin
+                new Vector2(0, maxY), // +Y
+            };
+        }
 
-		Vector2[] pts = [
-            new(0, 0), // origin
-            new(maxX, 0), // +X
-            new(0, 0), // origin
-            new(0, maxY), // +Y
-		];
-
-		_axisVbo.SetData<Vector2>(pts, BufferUsageHint.StaticDraw);
+        _axisVbo.SetData<Vector2>(pts, BufferUsageHint.StaticDraw);
 	}
 
 	public void Dispose() {

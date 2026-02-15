@@ -26,6 +26,32 @@ public sealed class DiskCellGrid : ICellGrid
         _ringCounts = ComputeRingCounts(_rings, _outerCount);
     }
 
+    /// <summary>
+    /// Compute the linear instance index for a given logical (ring,pos) in the same
+    /// ordering used by GetInstanceData (rings outer loop, positions inner loop).
+    /// Returns -1 if invalid.
+    /// </summary>
+    public int GetInstanceIndex(int ring, int pos)
+    {
+        if (ring < 0 || ring >= _rings) return -1;
+        int cnt = _ringCounts[ring];
+        if (pos < 0 || pos >= cnt) return -1;
+        int idx = 0;
+        for (int r = 0; r < ring; r++) idx += _ringCounts[r];
+        idx += pos;
+        return idx;
+    }
+
+    /// <summary>
+    /// Return the instance Vector4 for the given logical coords. This is the same
+    /// value that appears in the array returned by GetInstanceData.
+    /// </summary>
+    public Vector4 GetInstanceAt(int ring, int pos, float cellSize)
+    {
+        if (!IsValidCell(ring, pos)) return new Vector4(0,0,0,0);
+        return GetCellWorldPosition(ring, pos, cellSize);
+    }
+
     // Expose helper properties used by renderer to build logical coords list
     public int RingsCount => _rings;
     public int RingCountAt(int ring) => (ring >= 0 && ring < _rings) ? _ringCounts[ring] : 0;
@@ -217,19 +243,22 @@ public sealed class DiskCellGrid : ICellGrid
     public Vector4[] GetInstanceData(float cellSize)
     {
         var list = new System.Collections.Generic.List<Vector4>();
-        var center = new Vector2(((_rings - 1) * cellSize) * 0.5f, ((_outerCount - 1) * cellSize) * 0.5f);
+        // Use the same backing-grid centered origin as the renderer expects:
+        // center = ((count - 1) * cellSize) * 0.5f for each axis so that integer
+        // cell indices multiplied by cellSize align with GPU computations.
+        var center = GetBackingGridCenter(cellSize);
         for (int r = 0; r < _rings; r++)
         {
             int cnt = _ringCounts[r];
             float radius = r * cellSize;
+            // radial padding to avoid overlap near center (decays with radius)
+            float radialPad = cellSize * (0.5f + 0.5f * (float)Math.Exp(-radius / (cellSize * 4.0f)));
+            float paddedRadius = radius + radialPad;
             for (int p = 0; p < cnt; p++)
             {
                 double angle = (2.0 * Math.PI) * ((double)p / cnt);
-                float wx = center.X + (float)(radius * Math.Cos(angle));
-                float wy = center.Y + (float)(radius * Math.Sin(angle));
-                // translate so center is at origin
-                wx -= center.X;
-                wy -= center.Y;
+                float wx = center.X + (float)(paddedRadius * Math.Cos(angle));
+                float wy = center.Y + (float)(paddedRadius * Math.Sin(angle));
                 // z = angle (radians), w = ring count for this radius
                 list.Add(new Vector4(wx, wy, (float)angle, (float)cnt));
             }
@@ -242,10 +271,28 @@ public sealed class DiskCellGrid : ICellGrid
     /// </summary>
     public (int X, int Y) MapWorldToCell(Vector2 worldPos, float cellSize)
     {
-        var center = new Vector2(((_rings - 1) * cellSize) * 0.5f, ((_outerCount - 1) * cellSize) * 0.5f);
+        // World coordinates passed in are in renderer/world space where origin is top-left of backing grid.
+        // Convert to disk-centered coordinates to compute polar mapping.
+        var center = GetBackingGridCenter(cellSize);
         var rel = worldPos - center;
-        float radius = rel.Length;
-        int r = (int)Math.Round(radius / cellSize);
+        float L = rel.Length;
+
+        // Compute padded radii for each ring (same formula as used when generating instances)
+        float[] padded = new float[_rings];
+        for (int rr = 0; rr < _rings; rr++) {
+            float baseRad = (rr + 1) * cellSize;
+            float pad = cellSize * (0.5f + 0.5f * (float)Math.Exp(-baseRad / (cellSize * 4.0f)));
+            padded[rr] = baseRad + pad;
+        }
+
+        // Determine ring by checking which annular boundary L falls into. Boundaries are midpoints
+        // between adjacent padded radii. This avoids nearest-distance tie/rounding issues.
+        int r = -1;
+        for (int rr = 0; rr < _rings; rr++) {
+            float lower = (rr == 0) ? 0.0f : 0.5f * (padded[rr - 1] + padded[rr]);
+            float upper = (rr == _rings - 1) ? float.MaxValue : 0.5f * (padded[rr] + padded[rr + 1]);
+            if (L >= lower && L < upper) { r = rr; break; }
+        }
         if (r < 0 || r >= _rings) return (-1, -1);
         int cnt = _ringCounts[r];
         if (cnt <= 0) return (-1, -1);
@@ -255,6 +302,36 @@ public sealed class DiskCellGrid : ICellGrid
         int p = (int)Math.Round(frac * cnt) % cnt;
         if (p < 0) p += cnt;
         return (r, p);
+    }
+
+    /// <summary>
+    /// Return the center position of the backing rectangular grid in world coordinates.
+    /// This matches what the renderer uses: ((count - 1) * cellSize) * 0.5f per axis.
+    /// </summary>
+    public Vector2 GetBackingGridCenter(float cellSize)
+    {
+        return new Vector2(((_rings - 1) * cellSize) * 0.5f, ((_outerCount - 1) * cellSize) * 0.5f);
+    }
+
+    /// <summary>
+    /// Return the world-space center and angle for the given logical cell (ring,pos).
+    /// The returned Vector4 contains (x, y, angle, ringCount) where x/y are centered coordinates
+    /// (origin at disk center) suitable for feeding into renderer instance attributes.
+    /// </summary>
+    public Vector4 GetCellWorldPosition(int ring, int pos, float cellSize)
+    {
+        if (ring < 0 || ring >= _rings) return new Vector4(0,0,0,0);
+        int cnt = _ringCounts[ring];
+        if (cnt <= 0) return new Vector4(0,0,0,0);
+        float radius = ring * cellSize;
+        // same radial padding as GetInstanceData to ensure CPU/GPU alignment
+        float radialPad = cellSize * (0.5f + 0.5f * (float)Math.Exp(-radius / (cellSize * 4.0f)));
+        float paddedRadius = radius + radialPad;
+        double angle = (2.0 * Math.PI) * ((double)pos / cnt);
+        var center = GetBackingGridCenter(cellSize);
+        float wx = center.X + (float)(paddedRadius * Math.Cos(angle));
+        float wy = center.Y + (float)(paddedRadius * Math.Sin(angle));
+        return new Vector4(wx, wy, (float)angle, (float)cnt);
     }
 
     // Provide a simple neighbor coordinates implementation by calling GetNeighbors and mapping back to coords.

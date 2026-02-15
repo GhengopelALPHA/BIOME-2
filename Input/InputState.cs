@@ -65,9 +65,18 @@ public sealed class InputState {
     public (int X, int Y) GetPlacementStart() => (_lastPlacedX, _lastPlacedY);
 
     // Compute hovered cell coordinates given camera and renderer
-    public (int X, int Y) GetHoverCell(Graphics.Camera camera, Graphics.Renderer renderer) {
-        var worldPos = camera.ScreenToWorld(new OpenTK.Mathematics.Vector2(MouseX, MouseY), camera.Zoom);
+    public (int X, int Y) GetHoverCell(Camera camera, Renderer renderer) {
+        var worldPos = camera.ScreenToWorld(new Vector2(MouseX, MouseY), camera.Zoom);
         float cs = renderer.CellSize;
+        // If renderer/world indicate a spiral topology, ask the DiskCellGrid to map world coords -> (ring,pos).
+        var world = renderer.World;
+        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL) {
+            if (world.ActiveLayer?.Grid is World.CellGrid.DiskCellGrid disk) {
+                var mapped = disk.MapWorldToCell(worldPos, cs);
+                return (mapped.X, mapped.Y);
+            }
+        }
+
         int cellX = (int)Math.Floor(worldPos.X / cs);
         int cellY = (int)Math.Floor(worldPos.Y / cs);
         return (cellX, cellY);
@@ -76,7 +85,7 @@ public sealed class InputState {
     public void SetPlacementMode(PlacementMode mode) => _placementMode = mode;
 
 	// Central entry for handling interactions that involve camera panning and painting.
-	public void HandleInteractions(Graphics.Camera camera, Graphics.Renderer renderer, Simulation.SimulationController simulation) {
+	public void HandleInteractions(Camera camera, Renderer renderer, Simulation.SimulationController simulation) {
         // If UI wants the mouse, do nothing.
         if (GuiWantsMouse) {
             // reset drag/placing states to avoid stale state
@@ -125,14 +134,21 @@ public sealed class InputState {
     }
 
     // Handle placement action: picks cell under cursor and enqueues request if cell changed.
-    public void HandlePlacement(Graphics.Camera camera, Graphics.Renderer renderer, Simulation.SimulationController simulation) {
+    public void HandlePlacement(Camera camera, Renderer renderer, Simulation.SimulationController simulation) {
         // Do not act when UI wants mouse
         if (GuiWantsMouse) return;
 
         var worldPos = camera.ScreenToWorld(new Vector2(MouseX, MouseY), camera.Zoom);
         float cs = renderer.CellSize;
-        int cellX = (int)Math.Floor(worldPos.X / cs);
-        int cellY = (int)Math.Floor(worldPos.Y / cs);
+        int cellX, cellY;
+        var world = renderer.World;
+        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL && world.ActiveLayer?.Grid is Biome2.World.CellGrid.DiskCellGrid disk) {
+            var mapped = disk.MapWorldToCell(worldPos, cs);
+            cellX = mapped.X; cellY = mapped.Y;
+        } else {
+            cellX = (int)Math.Floor(worldPos.X / cs);
+            cellY = (int)Math.Floor(worldPos.Y / cs);
+        }
 
         if (_placementMode == PlacementMode.Pixel) {
             if (!_placing || cellX != _lastPlacedX || cellY != _lastPlacedY) {
@@ -165,8 +181,15 @@ public sealed class InputState {
         // compute end cell from current mouse
         var worldPos = camera.ScreenToWorld(new OpenTK.Mathematics.Vector2(MouseX, MouseY), camera.Zoom);
         float cs = renderer.CellSize;
-        int endX = (int)Math.Floor(worldPos.X / cs);
-        int endY = (int)Math.Floor(worldPos.Y / cs);
+        int endX, endY;
+        var world = renderer.World;
+        if (world != null && world.GridTopology == Biome2.World.CellGrid.GridTopologies.GridTopology.SPIRAL && world.ActiveLayer?.Grid is Biome2.World.CellGrid.DiskCellGrid disk) {
+            var mapped = disk.MapWorldToCell(worldPos, cs);
+            endX = mapped.X; endY = mapped.Y;
+        } else {
+            endX = (int)Math.Floor(worldPos.X / cs);
+            endY = (int)Math.Floor(worldPos.Y / cs);
+        }
 
         int startX = _lastPlacedX;
         int startY = _lastPlacedY;

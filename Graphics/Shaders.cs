@@ -16,6 +16,7 @@ layout(location = 2) in vec2 aCellCoord; // integer cell coords (cellX, cellY)
 uniform mat4 uViewProj;
 uniform float uCellSize;
 uniform vec2 uGridSize;
+uniform vec2 uDiskCenter;
 uniform int uUseTrapezoid;
 
 out vec2 vCellUv;
@@ -32,25 +33,24 @@ void main()
         // trapezoid width and ratio supplied as uniforms
         
         // Compute tangential half-width based on angular spacing so adjacent cells touch seamlessly.
-        // aInstance.w contains the ring's cell count (cnt). Compute arc length per cell = 2*pi*radius / cnt.
-        float radius = length(aInstance.xy);
-        
-        // radial length decreases with radius to generate extra padding near center
+        // aInstance.w contains the ring's cell count (cnt). aInstance.xy is absolute world coords.
+        vec2 centered = aInstance.xy - uDiskCenter;
+        float radius = length(centered);
+
+        // radial padding decreases with radius to generate extra spacing near center
         float radialPad = uCellSize * (0.5 + 0.5 * exp(-radius / (uCellSize * 4.0)));
-        radius += radialPad;
+        float radiusForArc = radius + radialPad;
         float cnt = max(1.0, aInstance.w);
-        float arc = 3.14159265359 * max(radius, 1e-6) / cnt;
-        float arcInner = 3.14159265359 * max(radius - uCellSize, 1e-6) / cnt;
-        // Choose outer half-width so that tangential span ~ arc * 0.5
-        float halfOuter = max(1, arc);
-        float halfInner = min(halfOuter, arcInner);
+        float arcOuter = 2.0 * 3.14159265359 * max(radiusForArc, 1e-6) / cnt;
+        float arcInner = 2.0 * 3.14159265359 * max(radiusForArc - uCellSize, 1e-6) / cnt;
+        float halfOuter = max(0.5, 0.5 * arcOuter);
+        float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
         float halfWidth = mix(halfInner, halfOuter, t);
 
         float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
-        
-        float yLocal = (aLocalPos.y - 0.5) + radialPad;
+        float yLocal = (aLocalPos.y - 0.5) * uCellSize + radialPad;
 
-        // rotate local by angle and translate by instance origin
+        // rotate local by angle and translate by instance origin (aInstance.xy is absolute world origin for this cell)
         float ca = cos(angle);
         float sa = sin(angle);
         vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
@@ -194,6 +194,9 @@ layout(location = 1) in vec4 aInstance; // origin.xy, size.xy
 
 uniform mat4 uViewProj;
 uniform float uCellSize;
+uniform int uUseTrapezoid;
+
+const float PI = 3.14159265359;
 
 out vec2 vRegionUv;    // coordinates in cell units (0..size)
 out vec2 vRegionNorm;  // normalized coordinates across region (0..1)
@@ -202,19 +205,47 @@ out vec2 vInstanceSize;
 
 void main()
 {
-    vec2 aInstancePos = aInstance.xy;
-    vec2 aInstanceSize = aInstance.zw;
+    if (uUseTrapezoid == 1) {
+        // Interpret aInstance as: xy = origin (centered world coords), z = angle, w = ring cell count
+        float angle = aInstance.z - PI * 0.5; // align short edge inward
+        float t = aLocalPos.y;
 
-    vec2 regionSizeWorld = aInstanceSize * uCellSize;
-    vec2 worldPos = aInstancePos + aLocalPos * regionSizeWorld;
+        float radius = length(aInstance.xy);
+        float cnt = max(1.0, aInstance.w);
+        float arc = 2.0 * PI * max(radius, 1e-6) / cnt;
+        float arcInner = 2.0 * PI * max(radius - uCellSize, 1e-6) / cnt;
+        float halfOuter = max(0.5 * arc, 0.5);
+        float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
+        float halfWidth = mix(halfInner, halfOuter, t);
 
-    // vRegionUv in cell units
-    vRegionUv = aLocalPos * aInstanceSize;
-    vRegionNorm = aLocalPos; // since aLocalPos goes 0..1 across region
-    vWorldPos = worldPos;
-    vInstanceSize = aInstanceSize;
+        float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
+        float yLocal = (aLocalPos.y - 0.5) * uCellSize;
 
-    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+        float ca = cos(angle);
+        float sa = sin(angle);
+        vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
+
+        vRegionUv = aLocalPos * vec2(1.0, 1.0);
+        vRegionNorm = aLocalPos;
+        vWorldPos = worldPos;
+        vInstanceSize = vec2(1.0, 1.0);
+
+        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+    } else {
+        vec2 aInstancePos = aInstance.xy;
+        vec2 aInstanceSize = aInstance.zw;
+
+        vec2 regionSizeWorld = aInstanceSize * uCellSize;
+        vec2 worldPos = aInstancePos + aLocalPos * regionSizeWorld;
+
+        // vRegionUv in cell units
+        vRegionUv = aLocalPos * aInstanceSize;
+        vRegionNorm = aLocalPos; // since aLocalPos goes 0..1 across region
+        vWorldPos = worldPos;
+        vInstanceSize = aInstanceSize;
+
+        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+    }
 }
 ";
 

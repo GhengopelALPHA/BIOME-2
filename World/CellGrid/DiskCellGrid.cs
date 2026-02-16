@@ -16,6 +16,10 @@ public sealed class DiskCellGrid : ICellGrid
     private readonly int[] _ringCounts;
     private readonly int _rings;
     private readonly int _outerCount;
+    
+    // Neighbor distance threshold control: 0.0 -> pick no neighbors, 1.0 -> behave as-is.
+    // Public so callers (e.g., UI) can tweak at runtime.
+    public float NeighborThreshold { get; set; } = 0.99f;
 
     public DiskCellGrid(int rings, int outerCount)
     {
@@ -127,113 +131,56 @@ public sealed class DiskCellGrid : ICellGrid
         byte backupInfinite = 0;
         byte backup = backupBorder;
 
-        int ni = 0;
-        int r = x;
-        int p = y;
+        // Get logical neighbor coordinates first, reusing existing logic.
+        Span<int> coordsX = stackalloc int[8];
+        Span<int> coordsY = stackalloc int[8];
+        int written = GetNeighborCoordinates(x, y, edgeMode, coordsX, coordsY);
 
-        if (r < 0 || r >= _rings)
-        {
-            for (int i = 0; i < 8; i++) dest[ni++] = backup;
-            return ni;
+        // If threshold disables neighbors completely, fill backups
+        if (NeighborThreshold <= 0.0f) {
+            for (int i = 0; i < written; i++) dest[i] = backup;
+            return written;
         }
 
-        int curCount = _ringCounts[r];
+        // Compute distances in a consistent unit (use cellSize=1.0 so normalized distances are scale-invariant)
+        var centerPos = GetCellWorldPosition(x, y, 1.0f);
+        double minD = double.MaxValue, maxD = double.MinValue;
+        double[] dists = new double[8];
+        bool[] valid = new bool[8];
+        for (int i = 0; i < written; i++) {
+            int rx = coordsX[i];
+            int ry = coordsY[i];
+            if (rx == -1 || ry == -1) { valid[i] = false; dists[i] = double.PositiveInfinity; continue; }
+            var p = GetCellWorldPosition(rx, ry, 1.0f);
+            double dx = p.X - centerPos.X;
+            double dy = p.Y - centerPos.Y;
+            double d = Math.Sqrt(dx * dx + dy * dy);
+            dists[i] = d;
+            valid[i] = true;
+            if (d < minD) minD = d;
+            if (d > maxD) maxD = d;
+        }
 
-        byte Fetch(int rr, int pp, out bool used)
-        {
-            used = true;
-            if (rr < 0 || rr >= _rings)
-            {
-                if (edgeMode == EdgeMode.WRAP)
-                {
-                    if (rr < 0) rr = (rr % _rings + _rings) % _rings;
-                    else rr = rr % _rings;
-                }
-                else
-                {
-                    used = false;
-                    return edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder;
-                }
+        // If no valid neighbors, fill backups
+        if (minD == double.MaxValue) {
+            for (int i = 0; i < written; i++) dest[i] = backup;
+            return written;
+        }
+
+        // Fill dest using thresholding: normalize distances to 0..1 (min->0, max->1) and include when <= NeighborThreshold
+        for (int i = 0; i < written; i++) {
+            if (!valid[i]) { dest[i] = (byte)(edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder); continue; }
+            double d = dists[i];
+            double norm = (maxD > minD) ? ((d - minD) / (maxD - minD)) : 1.0;
+            if (NeighborThreshold >= 1.0f || norm <= (double)NeighborThreshold) {
+                // include neighbor
+                dest[i] = _inner.GetCurrent(coordsX[i], coordsY[i]);
+            } else {
+                dest[i] = (byte)(edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder);
             }
-
-            int cnt = _ringCounts[rr];
-            if (cnt == 0)
-            {
-                used = false;
-                return edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder;
-            }
-
-            int wrapped = ((pp % cnt) + cnt) % cnt;
-            if (!IsValidCell(rr, wrapped))
-            {
-                used = false;
-                return edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder;
-            }
-
-            return _inner.GetCurrent(rr, wrapped);
         }
 
-        // Inner ring neighbors
-        if (r == 0)
-        {
-            if (edgeMode == EdgeMode.WRAP)
-            {
-                int innerR = _rings - 1;
-                int innerCnt = _ringCounts[innerR];
-                if (innerCnt > 0)
-                {
-                    double frac = (double)p / Math.Max(1, curCount);
-                    int center = (int)Math.Round(frac * innerCnt) % innerCnt;
-                    dest[ni++] = Fetch(innerR, center - 1, out _);
-                    dest[ni++] = Fetch(innerR, center, out _);
-                    dest[ni++] = Fetch(innerR, center + 1, out _);
-                }
-                else { dest[ni++] = backup; dest[ni++] = backup; dest[ni++] = backup; }
-            }
-            else { dest[ni++] = backup; dest[ni++] = backup; dest[ni++] = backup; }
-        }
-        else
-        {
-            int innerR = r - 1;
-            int innerCnt = _ringCounts[innerR];
-            double frac = (double)p / Math.Max(1, curCount);
-            int center = (int)Math.Round(frac * innerCnt) % Math.Max(1, innerCnt);
-            dest[ni++] = Fetch(innerR, center - 1, out _);
-            dest[ni++] = Fetch(innerR, center, out _);
-            dest[ni++] = Fetch(innerR, center + 1, out _);
-        }
-
-        // Same-ring neighbors: left, right
-        dest[ni++] = Fetch(r, p - 1, out _);
-        dest[ni++] = Fetch(r, p + 1, out _);
-
-        // Outer ring neighbors
-        if (r == _rings - 1)
-        {
-            if (edgeMode == EdgeMode.WRAP)
-            {
-                int outerR = 0;
-                int outerCnt = _ringCounts[outerR];
-                double frac = (double)p / Math.Max(1, curCount);
-                int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
-                dest[ni++] = Fetch(outerR, center - 1, out _);
-                dest[ni++] = Fetch(outerR, center, out _);
-                dest[ni++] = Fetch(outerR, center + 1, out _);
-            }
-            else { dest[ni++] = backup; dest[ni++] = backup; dest[ni++] = backup; }
-        }
-        else
-        {
-            int outerR = r + 1;
-            int outerCnt = _ringCounts[outerR];
-            double frac = (double)p / Math.Max(1, curCount);
-            int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
-            dest[ni++] = Fetch(outerR, center - 1, out _);
-            dest[ni++] = Fetch(outerR, center, out _);
-            dest[ni++] = Fetch(outerR, center + 1, out _);
-        }
-
-        return ni;
+        return written;
     }
 
     /// <summary>
@@ -337,23 +284,121 @@ public sealed class DiskCellGrid : ICellGrid
     // Provide a simple neighbor coordinates implementation by calling GetNeighbors and mapping back to coords.
     public int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY)
     {
-        // Reuse GetNeighbors to determine which neighbors are valid and then compute coords in row-major of backing store.
-        Span<byte> vals = stackalloc byte[8];
-        int written = GetNeighbors(x, y, edgeMode, vals);
+        if (destX.Length < 8 || destY.Length < 8) throw new ArgumentException("destX/destY must be at least length 8");
+
         int ni = 0;
-        for (int i = 0; i < written; i++) {
-            // Map index i to offset
-            int ox = (i % 3) - 1;
-            int oy = (i / 3) - 1;
-            int nx = x + ox;
-            int ny = y + oy;
-            if (nx < 0 || nx >= Width || ny < 0 || ny >= Height) {
-                destX[ni] = -1; destY[ni] = -1;
-            } else {
-                destX[ni] = nx; destY[ni] = ny;
-            }
-            ni++;
+        int r = x;
+        int p = y;
+
+        if (r < 0 || r >= _rings) {
+            for (int i = 0; i < 8; i++) { destX[ni] = -1; destY[ni] = -1; ni++; }
+            return ni;
         }
+
+        int curCount = _ringCounts[r];
+
+        // Helper to resolve a candidate (ring,pos) into a concrete coordinate honoring edgeMode.
+        // Returns (resolvedRing, resolvedPos) or (-1,-1) when invalid/out-of-range.
+        (int rr, int pp) Resolve(int targetRing, int targetPos, out bool used)
+        {
+            used = true;
+
+            if (targetRing < 0 || targetRing >= _rings)
+            {
+                if (edgeMode == EdgeMode.WRAP)
+                {
+                    if (targetRing < 0) targetRing = (targetRing % _rings + _rings) % _rings;
+                    else targetRing = targetRing % _rings;
+                }
+                else
+                {
+                    used = false;
+                    return (-1, -1);
+                }
+            }
+
+            int cnt = _ringCounts[targetRing];
+            if (cnt == 0)
+            {
+                used = false;
+                return (-1, -1);
+            }
+
+            int wrapped = ((targetPos % cnt) + cnt) % cnt;
+            if (!IsValidCell(targetRing, wrapped))
+            {
+                used = false;
+                return (-1, -1);
+            }
+
+            return (targetRing, wrapped);
+        }
+
+        // Inner ring neighbors: inner-left, inner-center, inner-right
+        if (r == 0)
+        {
+            if (edgeMode == EdgeMode.WRAP)
+            {
+                int innerR = _rings - 1;
+                int innerCnt = _ringCounts[innerR];
+                if (innerCnt > 0)
+                {
+                    double frac = (double)p / Math.Max(1, curCount);
+                    int center = (int)Math.Round(frac * innerCnt) % innerCnt;
+                    var a = Resolve(innerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+                    var b = Resolve(innerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+                    var c = Resolve(innerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+                }
+                else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+            }
+            else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+        }
+        else
+        {
+            int innerR = r - 1;
+            int innerCnt = _ringCounts[innerR];
+            double frac = (double)p / Math.Max(1, curCount);
+            int center = (int)Math.Round(frac * innerCnt) % Math.Max(1, innerCnt);
+            var a = Resolve(innerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+            var b = Resolve(innerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+            var c = Resolve(innerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+        }
+
+        // Same-ring neighbors: left, right
+        var sL = Resolve(r, p - 1, out _); destX[ni] = sL.rr; destY[ni] = sL.pp; ni++;
+        var sR = Resolve(r, p + 1, out _); destX[ni] = sR.rr; destY[ni] = sR.pp; ni++;
+
+        // Outer ring neighbors: outer-left, outer-center, outer-right
+        if (r == _rings - 1)
+        {
+            if (edgeMode == EdgeMode.WRAP)
+            {
+                int outerR = 0;
+                int outerCnt = _ringCounts[outerR];
+                double frac = (double)p / Math.Max(1, curCount);
+                int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
+                var a = Resolve(outerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+                var b = Resolve(outerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+                var c = Resolve(outerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+            }
+            else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+        }
+        else
+        {
+            int outerR = r + 1;
+            int outerCnt = _ringCounts[outerR];
+            double frac = (double)p / Math.Max(1, curCount);
+            int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
+            var a = Resolve(outerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+            var b = Resolve(outerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+            var c = Resolve(outerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+        }
+
+        // Ensure invalid placeholders are (-1,-1)
+        for (int i = 0; i < ni; i++) {
+            if (destX[i] == -1 || destY[i] == -1) { destX[i] = -1; destY[i] = -1; }
+        }
+
         return ni;
     }
 }

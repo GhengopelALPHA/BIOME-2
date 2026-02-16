@@ -337,23 +337,121 @@ public sealed class DiskCellGrid : ICellGrid
     // Provide a simple neighbor coordinates implementation by calling GetNeighbors and mapping back to coords.
     public int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY)
     {
-        // Reuse GetNeighbors to determine which neighbors are valid and then compute coords in row-major of backing store.
-        Span<byte> vals = stackalloc byte[8];
-        int written = GetNeighbors(x, y, edgeMode, vals);
+        if (destX.Length < 8 || destY.Length < 8) throw new ArgumentException("destX/destY must be at least length 8");
+
         int ni = 0;
-        for (int i = 0; i < written; i++) {
-            // Map index i to offset
-            int ox = (i % 3) - 1;
-            int oy = (i / 3) - 1;
-            int nx = x + ox;
-            int ny = y + oy;
-            if (nx < 0 || nx >= Width || ny < 0 || ny >= Height) {
-                destX[ni] = -1; destY[ni] = -1;
-            } else {
-                destX[ni] = nx; destY[ni] = ny;
-            }
-            ni++;
+        int r = x;
+        int p = y;
+
+        if (r < 0 || r >= _rings) {
+            for (int i = 0; i < 8; i++) { destX[ni] = -1; destY[ni] = -1; ni++; }
+            return ni;
         }
+
+        int curCount = _ringCounts[r];
+
+        // Helper to resolve a candidate (ring,pos) into a concrete coordinate honoring edgeMode.
+        // Returns (resolvedRing, resolvedPos) or (-1,-1) when invalid/out-of-range.
+        (int rr, int pp) Resolve(int targetRing, int targetPos, out bool used)
+        {
+            used = true;
+
+            if (targetRing < 0 || targetRing >= _rings)
+            {
+                if (edgeMode == EdgeMode.WRAP)
+                {
+                    if (targetRing < 0) targetRing = (targetRing % _rings + _rings) % _rings;
+                    else targetRing = targetRing % _rings;
+                }
+                else
+                {
+                    used = false;
+                    return (-1, -1);
+                }
+            }
+
+            int cnt = _ringCounts[targetRing];
+            if (cnt == 0)
+            {
+                used = false;
+                return (-1, -1);
+            }
+
+            int wrapped = ((targetPos % cnt) + cnt) % cnt;
+            if (!IsValidCell(targetRing, wrapped))
+            {
+                used = false;
+                return (-1, -1);
+            }
+
+            return (targetRing, wrapped);
+        }
+
+        // Inner ring neighbors: inner-left, inner-center, inner-right
+        if (r == 0)
+        {
+            if (edgeMode == EdgeMode.WRAP)
+            {
+                int innerR = _rings - 1;
+                int innerCnt = _ringCounts[innerR];
+                if (innerCnt > 0)
+                {
+                    double frac = (double)p / Math.Max(1, curCount);
+                    int center = (int) Math.Floor(frac * innerCnt) % innerCnt;
+                    var a = Resolve(innerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+                    var b = Resolve(innerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+                    var c = Resolve(innerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+                }
+                else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+            }
+            else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+        }
+        else
+        {
+            int innerR = r - 1;
+            int innerCnt = _ringCounts[innerR];
+            double frac = (double)p / Math.Max(1, curCount);
+            int center = (int) Math.Floor(frac * innerCnt) % Math.Max(1, innerCnt);
+            var a = Resolve(innerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+            var b = Resolve(innerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+            var c = Resolve(innerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+        }
+
+        // Same-ring neighbors: left, right
+        var sL = Resolve(r, p - 1, out _); destX[ni] = sL.rr; destY[ni] = sL.pp; ni++;
+        var sR = Resolve(r, p + 1, out _); destX[ni] = sR.rr; destY[ni] = sR.pp; ni++;
+
+        // Outer ring neighbors: outer-left, outer-center, outer-right
+        if (r == _rings - 1)
+        {
+            if (edgeMode == EdgeMode.WRAP)
+            {
+                int outerR = 0;
+                int outerCnt = _ringCounts[outerR];
+                double frac = (double)p / Math.Max(1, curCount);
+                int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
+                var a = Resolve(outerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+                var b = Resolve(outerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+                var c = Resolve(outerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+            }
+            else { destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; destX[ni] = -1; destY[ni] = -1; ni++; }
+        }
+        else
+        {
+            int outerR = r + 1;
+            int outerCnt = _ringCounts[outerR];
+            double frac = (double)p / Math.Max(1, curCount);
+            int center = (int)Math.Round(frac * outerCnt) % Math.Max(1, outerCnt);
+            var a = Resolve(outerR, center - 1, out _); destX[ni] = a.rr; destY[ni] = a.pp; ni++;
+            var b = Resolve(outerR, center, out _);     destX[ni] = b.rr; destY[ni] = b.pp; ni++;
+            var c = Resolve(outerR, center + 1, out _); destX[ni] = c.rr; destY[ni] = c.pp; ni++;
+        }
+
+        // Replace any (-1,-1) placeholders for invalid entries with the required sentinel
+        for (int i = 0; i < ni; i++) {
+            if (destX[i] == -1 || destY[i] == -1) { destX[i] = -1; destY[i] = -1; }
+        }
+
         return ni;
     }
 }

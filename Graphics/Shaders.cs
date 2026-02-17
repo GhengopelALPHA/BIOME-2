@@ -6,72 +6,92 @@ using System.Threading.Tasks;
 
 namespace Biome2.Graphics;
 internal static class Shaders {
-public const string GridVertex = @"
-#version 450 core
+	public const string GridVertexRect = @"#version 450 core
 
 layout(location = 0) in vec2 aLocalPos;
-layout(location = 1) in vec4 aInstance; // xy = origin, z = angle, w = pad
-layout(location = 2) in vec2 aCellCoord; // integer cell coords (cellX, cellY)
+layout(location = 1) in vec4 aInstance; // xy = origin, z = angle (unused), w = pad
+layout(location = 2) in vec2 aCellCoord;
 
 uniform mat4 uViewProj;
 uniform float uCellSize;
 uniform vec2 uGridSize;
-uniform vec2 uDiskCenter;
-uniform int uUseTrapezoid;
 
 out vec2 vCellUv;
 flat out ivec2 vCellCoord;
 
 void main()
 {
-    // Choose trapezoid or regular quad behavior based on topology flag.
-    if (uUseTrapezoid == 1) {
-        // Compute trapezoid local coordinates where y is radial (inner->outer) and x is tangential.
-        // Rotate clockwise by 90 degrees so short side faces inward correctly.
-        float angle = aInstance.z - 1.57079632679; // -PI/2
-        float t = aLocalPos.y; // 0..1 from inner to outer
-        // trapezoid width and ratio supplied as uniforms
-        
-        // Compute tangential half-width based on angular spacing so adjacent cells touch seamlessly.
-        // aInstance.w contains the ring's cell count (cnt). aInstance.xy is absolute world coords.
-        vec2 centered = aInstance.xy - uDiskCenter;
-        float radius = length(centered);
-
-        // radial padding decreases with radius to generate extra spacing near center
-        float radialPad = uCellSize * (0.25 + 0.75 * exp(-radius / (uCellSize * 4.0)));
-        float radiusForArc = radius + radialPad;
-        float cnt = max(1.0, aInstance.w);
-        float arcOuter = 2.0 * 3.14159265359 * max(radiusForArc, 1e-6) / cnt;
-        float arcInner = 2.0 * 3.14159265359 * max(radiusForArc - uCellSize, 1e-6) / cnt;
-        float halfOuter = max(0.5, 0.5 * arcOuter);
-        float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
-        float halfWidth = mix(halfInner, halfOuter, t);
-
-        float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
-        float yLocal = (aLocalPos.y - 0.5) * uCellSize + radialPad;
-
-        // rotate local by angle and translate by instance origin (aInstance.xy is absolute world origin for this cell)
-        float ca = cos(angle);
-        float sa = sin(angle);
-        vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
-
-        // vCellUv is used to draw border lines in fragment shader.
-        vCellUv = aLocalPos;
-        // use provided integer cell coordinates from separate attribute
-        vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
-
-        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
-    } else {
-        // Regular axis-aligned quad. Interpret aInstance.xy as origin.
-        vec2 worldPos = aInstance.xy + (aLocalPos * uCellSize);
-        vCellUv = aLocalPos;
-        vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
-        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
-    }
+    vec2 worldPos = aInstance.xy + (aLocalPos * uCellSize);
+    vCellUv = aLocalPos;
+    vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
 }";
 
-	public const string GridFragment = @"
-#version 450 core
+	public const string GridVertexHex = @"#version 450 core
+
+layout(location = 0) in vec2 aLocalPos;
+layout(location = 1) in vec4 aInstance; // xy = origin (top-left)
+layout(location = 2) in vec2 aCellCoord;
+
+uniform mat4 uViewProj;
+uniform float uCellSize;
+uniform int uShowGrid;
+uniform vec2 uGridSize;
+
+out vec2 vCellUv;
+flat out ivec2 vCellCoord;
+
+void main()
+{
+    float hexH = uCellSize * 0.86602540378;
+    if (uShowGrid == 1) {
+        hexH *= 0.975;
+    }
+    vec2 worldPos = aInstance.xy + aLocalPos * vec2(uCellSize, hexH);
+    vCellUv = aLocalPos;
+    vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+}";
+
+	public const string GridVertexDisk = @"#version 450 core
+
+layout(location = 0) in vec2 aLocalPos;
+layout(location = 1) in vec4 aInstance; // xy = origin, z = angle, w = ring count
+layout(location = 2) in vec2 aCellCoord;
+
+uniform mat4 uViewProj;
+uniform float uCellSize;
+uniform vec2 uGridSize;
+uniform vec2 uDiskCenter;
+
+out vec2 vCellUv;
+flat out ivec2 vCellCoord;
+
+void main()
+{
+    float angle = aInstance.z - 1.57079632679; // -PI/2
+    float t = aLocalPos.y;
+    vec2 centered = aInstance.xy - uDiskCenter;
+    float radius = length(centered);
+    float radialPad = uCellSize * (0.25 + 0.75 * exp(-radius / (uCellSize * 4.0)));
+    float radiusForArc = radius + radialPad;
+    float cnt = max(1.0, aInstance.w);
+    float arcOuter = 2.0 * 3.14159265359 * max(radiusForArc, 1e-6) / cnt;
+    float arcInner = 2.0 * 3.14159265359 * max(radiusForArc - uCellSize, 1e-6) / cnt;
+    float halfOuter = max(0.5, 0.5 * arcOuter);
+    float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
+    float halfWidth = mix(halfInner, halfOuter, t);
+    float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
+    float yLocal = (aLocalPos.y - 0.5) * uCellSize + radialPad;
+    float ca = cos(angle);
+    float sa = sin(angle);
+    vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
+    vCellUv = aLocalPos;
+    vCellCoord = ivec2(int(aCellCoord.x + 0.5), int(aCellCoord.y + 0.5));
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+}";
+
+	public const string GridFragmentRect = @"#version 450 core
 
 in vec2 vCellUv;
 flat in ivec2 vCellCoord;
@@ -82,38 +102,24 @@ uniform float uPixelsPerUnit;
 uniform float uGridThicknessPx;
 uniform float uCellSize;
 uniform vec2 uGridSize;
-uniform sampler2D uCellIndices; // R8 texture containing species indices per cell (normalized)
-uniform sampler2D uPalette;     // 1xN RGBA palette texture
+uniform sampler2D uCellIndices;
+uniform sampler2D uPalette;
 uniform int uSpeciesCount;
 
 void main()
 {
-    // Fetch the per-cell species index from the index texture. The index texture
-    // is stored as R8 (normalized) so multiply back to 0..255 and clamp to species count.
     ivec2 coord = vCellCoord;
     float idxNorm = texelFetch(uCellIndices, coord, 0).r;
     int idx = int(idxNorm * 255.0 + 0.5);
     if (uSpeciesCount > 0) idx = clamp(idx, 0, uSpeciesCount - 1);
-
-    // Lookup color in the palette (palette is a 1xN texture, sample by texelFetch for exact lookup).
     ivec2 pcoord = ivec2(idx, 0);
     vec4 texColor = texelFetch(uPalette, pcoord, 0);
-
-    // If grid is disabled, output the texel color directly so adjacent
-    // cells with the same color render contiguously (no seams).
-    // Compute a thin world-edge overlay (1-pixel) that draws a light-grey
-    // line around the outermost cells. This should be visible regardless of
-    // whether grid lines are shown.
     float uvPixel = (1.0 / max(uPixelsPerUnit, 0.0001)) / max(uCellSize, 0.0005);
     float edgeFade = clamp(uvPixel * 0.5, 1e-6, 0.5);
-
-    // Edge thickness in world units corresponding to ~1 screen pixel
     float edgeWorldUnits = (1.0 / max(uPixelsPerUnit, 0.01));
     float edgeNormalized = edgeWorldUnits / max(uCellSize, 0.0001);
-
     int gridW = int(uGridSize.x + 0.5);
     int gridH = int(uGridSize.y + 0.5);
-
     float leftMask = 0.0;
     float rightMask = 0.0;
     float downMask = 0.0;
@@ -126,43 +132,104 @@ void main()
         if (coord.y == 0) downMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, vCellUv.y);
         if (coord.y == gridH - 1) upMask = 1.0 - smoothstep(edgeNormalized - edgeFade, edgeNormalized + edgeFade, 1.0 - vCellUv.y);
     }
-
     float borderMask = max(max(leftMask, rightMask), max(downMask, upMask));
     vec3 worldBorderColor = vec3(0.5, 0.5, 0.5);
-
     if (uShowGrid == 0) {
-        // Even when grid lines are disabled, overlay the world border.
         vec3 base = texColor.rgb;
         vec3 outColor = mix(worldBorderColor, base, 1.0 - borderMask);
         fragColor = vec4(outColor, texColor.a);
         return;
     }
-
-    // Otherwise compute an inset and anti-aliased interior mask to show grid gaps.
     float worldThickness = uGridThicknessPx / max(uPixelsPerUnit, 0.01);
     float inset = worldThickness / (2.0 * max(uCellSize, 0.0001));
     inset = clamp(inset, 0.0, 0.1);
-
-    // Anti-aliasing fade expressed in UV coordinates (approx. half a screen
-    // pixel converted into cell-local UV space). Reuse edgeFade computed above.
     float fade = edgeFade;
-
     float left = smoothstep(inset - fade, inset + fade, vCellUv.x);
     float right = smoothstep(inset - fade, inset + fade, 1.0 - vCellUv.x);
     float down = smoothstep(inset - fade, inset + fade, vCellUv.y);
     float up = smoothstep(inset - fade, inset + fade, 1.0 - vCellUv.y);
-
     float interior = left * right * down * up;
-
     vec3 borderColor = vec3(0.0, 0.0, 0.0);
     vec3 color = mix(borderColor, texColor.rgb, interior);
-
-    // Overlay world border (light grey) on top of the cell color.
     vec3 finalColor = mix(worldBorderColor, color, 1.0 - borderMask);
-
     fragColor = vec4(finalColor, texColor.a);
+}";
+
+	public const string GridFragmentHex = @"#version 450 core
+
+in vec2 vCellUv;
+flat in ivec2 vCellCoord;
+out vec4 fragColor;
+
+uniform int uShowGrid;
+uniform float uPixelsPerUnit;
+uniform float uGridThicknessPx;
+uniform float uCellSize;
+uniform vec2 uGridSize;
+uniform sampler2D uCellIndices;
+uniform sampler2D uPalette;
+uniform int uSpeciesCount;
+
+float hexInteriorMask(vec2 uv, float cellSize, float pixelsPerUnit, float thicknessWorld, out float edgeDist)
+{
+    // If uShowGrid is off, the caller uploaded unscaled vCellUv so we should not apply uHexScale here.
+    float hexH = cellSize * 0.865;
+    float aspect = hexH / cellSize;
+    vec2 p = uv - vec2(0.5);
+    // To match the vertex scaling, the fragment receives vCellUv already scaled when grid on.
+    p.y *= aspect;
+    p = abs(p);
+    float k = 0.57735026919; // tan(30deg)
+    float t = 0.5 - (p.x + p.y * k);
+    edgeDist = t;
+    // Map edge distance into an interior blend factor with a small transition.
+    return clamp(t * 10.0 + 0.5, 0.0, 1.0);
 }
-";
+
+void main()
+{
+    ivec2 coord = vCellCoord;
+    float idxNorm = texelFetch(uCellIndices, coord, 0).r;
+    int idx = int(idxNorm * 255.0 + 0.5);
+    if (uSpeciesCount > 0) idx = clamp(idx, 0, uSpeciesCount - 1);
+    ivec2 pcoord = ivec2(idx, 0);
+    vec4 texColor = texelFetch(uPalette, pcoord, 0);
+    float uvPixel = (1.0 / max(uPixelsPerUnit, 0.0001)) / max(uCellSize, 0.0005);
+    float edgeFade = clamp(uvPixel * 0.5, 0.0, 0.001);
+    float edgeWorldUnits = (1.0 / max(uPixelsPerUnit, 0.001));
+    // Compute hex interior distance (positive inside, negative outside)
+    float edgeDist;
+    float interior = hexInteriorMask(vCellUv, uCellSize, uPixelsPerUnit, edgeWorldUnits, edgeDist);
+    float aaW = edgeFade;
+
+    // If grid lines are disabled, render only the hex interior and discard fragments outside the hex.
+    // Use a small AA guard (aaW) to avoid visible seams between adjacent hexes.
+    if (uShowGrid == 0) {
+        if (edgeDist <= aaW) discard;
+        fragColor = vec4(texColor.rgb, texColor.a);
+        return;
+    }
+
+    // Thickness of grid border expressed in normalized cell units
+    float worldThickness = uGridThicknessPx / max(uPixelsPerUnit, 0.001);
+    float thicknessNorm = worldThickness / max(uCellSize, 0.0001);
+
+    // Grid enabled: discard fragments well outside the hex.
+    //if (edgeDist <= -aaW) discard;
+
+    // Border width (normalized to cell units). Make it thin by default: use 0.75x thicknessNorm
+    float borderW = max(thicknessNorm, 0.0001);
+    // Smooth blend region for anti-aliasing
+    float blendW = aaW;
+
+    // interiorFactor = 0 at border edge, 1 inside cell beyond borderW+blendW
+    float interiorFactor = smoothstep(borderW, borderW + blendW, edgeDist);
+    vec3 borderColor = vec3(0.0, 0.0, 0.0);
+    vec3 color = mix(borderColor, texColor.rgb, interiorFactor);
+    // If fragment is outside hex (edgeDist <= 0), discard to avoid rectangular artifacts
+    if (edgeDist <= 0.0) discard;
+    fragColor = vec4(color, texColor.a);
+}";
 
 	public const string AxisVertex = @"
 #version 450 core
@@ -186,18 +253,13 @@ void main()
     fragColor = vec4(uColor, 1.0);
 }";
 
-	public const string HighlightVertex = @"
-#version 450 core
+	public const string HighlightVertexRect = @"#version 450 core
 
 layout(location = 0) in vec2 aLocalPos;    // 0..1 local quad
 layout(location = 1) in vec4 aInstance; // origin.xy, size.xy
 
 uniform mat4 uViewProj;
 uniform float uCellSize;
-uniform int uUseTrapezoid;
-uniform vec2 uDiskCenter;
-
-const float PI = 3.14159265359;
 
 out vec2 vRegionUv;    // coordinates in cell units (0..size)
 out vec2 vRegionNorm;  // normalized coordinates across region (0..1)
@@ -206,59 +268,84 @@ out vec2 vInstanceSize;
 
 void main()
 {
-    if (uUseTrapezoid == 1) {
-        // Interpret aInstance as: xy = origin (absolute world coords), z = angle, w = ring cell count
-        float angle = aInstance.z - PI * 0.5; // align short edge inward
-        float t = aLocalPos.y;
+    vec2 aInstancePos = aInstance.xy;
+    vec2 aInstanceSize = aInstance.zw;
+    vec2 regionSizeWorld = aInstanceSize * uCellSize;
+    vec2 worldPos = aInstancePos + aLocalPos * regionSizeWorld;
+    vRegionUv = aLocalPos * aInstanceSize;
+    vRegionNorm = aLocalPos;
+    vWorldPos = worldPos;
+    vInstanceSize = aInstanceSize;
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+}";
 
-        // compute radius relative to disk center so padding matches CPU
-        vec2 centered = aInstance.xy - uDiskCenter;
-        float radius = length(centered);
+	public const string HighlightVertexHex = @"#version 450 core
 
-        // radial padding (same formula as CPU)
-        float radialPad = uCellSize * (0.25 + 0.75 * exp(-radius / (uCellSize * 4.0)));
-        float radiusForArc = radius + radialPad;
+layout(location = 0) in vec2 aLocalPos;
+layout(location = 1) in vec4 aInstance; // origin.xy, size unused
 
-        float cnt = max(1.0, aInstance.w);
-        float arcOuter = 2.0 * PI * max(radiusForArc, 1e-6) / cnt;
-        float arcInner = 2.0 * PI * max(radiusForArc - uCellSize, 1e-6) / cnt;
-        float halfOuter = max(0.5, 0.5 * arcOuter);
-        float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
-        float halfWidth = mix(halfInner, halfOuter, t);
+uniform mat4 uViewProj;
+uniform float uCellSize;
 
-        float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
-        float yLocal = (aLocalPos.y - 0.5) * uCellSize + radialPad;
+out vec2 vRegionUv;
+out vec2 vRegionNorm;
+out vec2 vWorldPos;
+out vec2 vInstanceSize;
 
-        float ca = cos(angle);
-        float sa = sin(angle);
-        vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
+void main()
+{
+    float hexH = uCellSize * 0.86602540378;
+    vec2 worldPos = aInstance.xy + aLocalPos * vec2(uCellSize, hexH);
+    vRegionUv = aLocalPos;
+    vRegionNorm = aLocalPos;
+    vWorldPos = worldPos;
+    vInstanceSize = vec2(1.0, 1.0);
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+}";
 
-        vRegionUv = aLocalPos * vec2(1.0, 1.0);
-        vRegionNorm = aLocalPos;
-        vWorldPos = worldPos;
-        vInstanceSize = vec2(1.0, 1.0);
+	public const string HighlightVertexDisk = @"#version 450 core
 
-        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
-    } else {
-        vec2 aInstancePos = aInstance.xy;
-        vec2 aInstanceSize = aInstance.zw;
+layout(location = 0) in vec2 aLocalPos;
+layout(location = 1) in vec4 aInstance; // origin.xy, z=angle, w=ringCount
 
-        vec2 regionSizeWorld = aInstanceSize * uCellSize;
-        vec2 worldPos = aInstancePos + aLocalPos * regionSizeWorld;
+uniform mat4 uViewProj;
+uniform float uCellSize;
+uniform vec2 uDiskCenter;
 
-        // vRegionUv in cell units
-        vRegionUv = aLocalPos * aInstanceSize;
-        vRegionNorm = aLocalPos; // since aLocalPos goes 0..1 across region
-        vWorldPos = worldPos;
-        vInstanceSize = aInstanceSize;
+out vec2 vRegionUv;
+out vec2 vRegionNorm;
+out vec2 vWorldPos;
+out vec2 vInstanceSize;
 
-        gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
-    }
-}
-";
+const float PI = 3.14159265359;
 
-	public const string HighlightFragment = @"
-#version 450 core
+void main()
+{
+    float angle = aInstance.z - PI * 0.5;
+    float t = aLocalPos.y;
+    vec2 centered = aInstance.xy - uDiskCenter;
+    float radius = length(centered);
+    float radialPad = uCellSize * (0.25 + 0.75 * exp(-radius / (uCellSize * 4.0)));
+    float radiusForArc = radius + radialPad;
+    float cnt = max(1.0, aInstance.w);
+    float arcOuter = 2.0 * PI * max(radiusForArc, 1e-6) / cnt;
+    float arcInner = 2.0 * PI * max(radiusForArc - uCellSize, 1e-6) / cnt;
+    float halfOuter = max(0.5, 0.5 * arcOuter);
+    float halfInner = clamp(0.5 * arcInner, 0.0, halfOuter);
+    float halfWidth = mix(halfInner, halfOuter, t);
+    float xLocal = (aLocalPos.x - 0.5) * 2.0 * halfWidth;
+    float yLocal = (aLocalPos.y - 0.5) * uCellSize + radialPad;
+    float ca = cos(angle);
+    float sa = sin(angle);
+    vec2 worldPos = aInstance.xy + vec2(ca * xLocal - sa * yLocal, sa * xLocal + ca * yLocal);
+    vRegionUv = aLocalPos * vec2(1.0, 1.0);
+    vRegionNorm = aLocalPos;
+    vWorldPos = worldPos;
+    vInstanceSize = vec2(1.0, 1.0);
+    gl_Position = uViewProj * vec4(worldPos.xy, 0.0, 1.0);
+}";
+
+	public const string HighlightFragmentRect = @"#version 450 core
 
 in vec2 vRegionUv;
 in vec2 vRegionNorm;
@@ -266,53 +353,74 @@ in vec2 vWorldPos;
 in vec2 vInstanceSize;
 out vec4 fragColor;
 
-uniform float uTime; // seconds, for animation
+uniform float uTime;
 uniform float uPixelsPerUnit;
-uniform float uBorderThicknessPx; // thickness in pixels
-uniform float uCellSize; // world units per cell
-uniform float uDotFrequency; // dots per cell along border
-uniform vec3 uColorA; // dot color A (e.g., black)
-uniform vec3 uColorB; // dot color B (e.g., white)
+uniform float uBorderThicknessPx;
+uniform float uCellSize;
+uniform float uDotFrequency;
+uniform vec3 uColorA;
+uniform vec3 uColorB;
 uniform float uAlpha;
-
-float aa(float x, float w) {
-    // simple linear AA over w
-    return clamp(x / w, 0.0, 1.0);
-}
 
 void main()
 {
-    // Border thickness in world units and normalized relative to instance size
     float borderWorld = uBorderThicknessPx / max(uPixelsPerUnit, 0.01);
     vec2 regionWorld = vInstanceSize * uCellSize;
     float bn = min(borderWorld / max(regionWorld.x, 1e-6), borderWorld / max(regionWorld.y, 1e-6));
     bn = clamp(bn, 0.001, 0.5);
-
     float dLeft = vRegionNorm.x;
     float dRight = 1.0 - vRegionNorm.x;
     float dDown = vRegionNorm.y;
     float dUp = 1.0 - vRegionNorm.y;
     float distToEdge = min(min(dLeft, dRight), min(dDown, dUp));
-
     if (distToEdge > bn) discard;
-
-    // Determine which edge we're on and compute along coordinate in cell units
     float along;
     float length;
-    if (dLeft <= bn || dRight <= bn) {
-        along = vRegionUv.y;
-        length = vInstanceSize.y;
-    } else {
-        along = vRegionUv.x;
-        length = vInstanceSize.x;
-    }
-
-    // Dotted pattern along edge; animate shift with time
+    if (dLeft <= bn || dRight <= bn) { along = vRegionUv.y; length = vInstanceSize.y; } else { along = vRegionUv.x; length = vInstanceSize.x; }
     float p = along * uDotFrequency;
     float phase = fract(p + uTime * 4.0);
     float choice = step(0.5, phase);
     vec3 col = mix(uColorA, uColorB, choice);
     fragColor = vec4(col, uAlpha);
-}
-";
+}";
+
+	public const string HighlightFragmentHex = @"#version 450 core
+
+in vec2 vRegionUv;
+in vec2 vRegionNorm;
+in vec2 vWorldPos;
+in vec2 vInstanceSize;
+out vec4 fragColor;
+
+uniform float uTime;
+uniform float uPixelsPerUnit;
+uniform float uBorderThicknessPx;
+uniform float uCellSize;
+uniform float uDotFrequency;
+uniform vec3 uColorA;
+uniform vec3 uColorB;
+uniform float uAlpha;
+
+void main()
+{
+    float borderWorld = uBorderThicknessPx / max(uPixelsPerUnit, 0.01);
+    vec2 regionWorld = vInstanceSize * uCellSize;
+    float bn = min(borderWorld / max(regionWorld.x, 1e-6), borderWorld / max(regionWorld.y, 1e-6));
+    bn = clamp(bn, 0.001, 0.5);
+    float hexH = uCellSize * 0.86602540378;
+    float aspect = hexH / uCellSize;
+    vec2 p = vRegionNorm - vec2(0.5);
+    p.y /= aspect;
+    p = abs(p);
+    float k = 0.57735026919;
+    float edgeDist = 0.5 - (p.x + p.y * k);
+    if (edgeDist < -bn) discard;
+    if (edgeDist > bn) discard;
+    float along = vRegionUv.x * (vInstanceSize.x);
+    float pval = along * uDotFrequency;
+    float phase = fract(pval + uTime * 4.0);
+    float choice = step(0.5, phase);
+    vec3 col = mix(uColorA, uColorB, choice);
+    fragColor = vec4(col, uAlpha);
+}";
 }

@@ -34,7 +34,8 @@ internal sealed class ToolboxWindow
     // Editable grid size fields (spinners)
     private int _gridWidth = 0;
     private int _gridHeight = 0;
-    private WorldState? _lastWorldRef = null;
+    private int _gridDepth = 0; // for hex topology, optional depth dimension
+	private WorldState? _lastWorldRef = null;
 
     private static ImGuiWindowFlags GetWindowFlags()
     {
@@ -67,6 +68,7 @@ internal sealed class ToolboxWindow
 			if (!object.ReferenceEquals(_lastWorldRef, world)) {
 				_gridWidth = world.WidthCells;
 				_gridHeight = world.HeightCells;
+                _gridDepth = world.DepthCells;
 				_lastWorldRef = world;
 			}
 		}
@@ -181,10 +183,26 @@ internal sealed class ToolboxWindow
 
 		ImGui.Separator();
 
-		// Two input spinners for width and height
-		ImGui.PushItemWidth(120);
-		ImGui.InputInt("Width", ref _gridWidth, 1, 10);
-		ImGui.InputInt("Height", ref _gridHeight, 1, 10);
+        // Two input spinners for width and height. If the world uses a spiral topology
+        // present more domain-appropriate labels (Rings / Outers).
+        ImGui.PushItemWidth(120);
+        string widthLabel = "Width";
+        string heightLabel = "Height";
+        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL) {
+            widthLabel = "Rings";
+            heightLabel = "Outers";
+        }
+        ImGui.InputInt(widthLabel, ref _gridWidth, 1, 5);
+        ImGui.InputInt(heightLabel, ref _gridHeight, 1, 5);
+        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.HEX) {
+            ImGui.InputInt("Depth", ref _gridDepth, 1, 5);
+		}
+        if (_gridWidth < 1)
+			_gridWidth = 1;
+        if (_gridHeight < 1)
+            _gridHeight = 1;
+        if (_gridDepth < 1)
+            _gridDepth = 1;
 		ImGui.PopItemWidth();
 
 		// Restart World button (centered)
@@ -196,9 +214,7 @@ internal sealed class ToolboxWindow
 		}
 		if (ImGui.Button(RestartWorldButtonLabel)) {
 			try {
-				int w = Math.Max(1, _gridWidth);
-				int h = Math.Max(1, _gridHeight);
-				simulation.RestartWorld(w, h);
+				simulation.RestartWorld(_gridWidth, _gridHeight, _gridDepth);
 			} catch (Exception ex) {
 				Logger.Error($"Failed to restart world: {ex.Message}");
 			}

@@ -36,6 +36,7 @@ public sealed class WorldModel {
     public WorldModel(
         int width,
         int height,
+        int depth,
         bool paused,
         IReadOnlyList<SpeciesModel> species,
         IReadOnlyList<string> layers,
@@ -45,6 +46,7 @@ public sealed class WorldModel {
 	) {
         Width = width;
         Height = height;
+		HexDepth = depth;
         Paused = paused;
         Species = species ?? [];
         Layers = layers ?? [];

@@ -18,63 +18,76 @@ namespace Biome2.Graphics;
 /// Today everything is empty, later you will map values to palettes.
 /// </summary>
 public sealed class Renderer(float cellSize) : IDisposable {
-	private readonly float _cellSize = cellSize;
-	public float CellSize => _cellSize;
+    private readonly float _cellSize = cellSize;
+    public float CellSize => _cellSize;
 
-	private ShaderProgram _shader = null!;
-	private ShaderProgram _axisShader = null!;
-    private ShaderProgram? _highlightShader = null;
+    private ShaderProgram _shader = null!; // currently active shader
+    private ShaderProgram _shaderRect = null!;
+    private ShaderProgram _shaderHex = null!;
+    private ShaderProgram _shaderDisk = null!;
+
+    private ShaderProgram _axisShader = null!;
+
+    private ShaderProgram? _highlightShader = null; // currently active highlight shader
+    private ShaderProgram? _highlightShaderRect = null!;
+    private ShaderProgram? _highlightShaderHex = null!;
+    private ShaderProgram? _highlightShaderDisk = null!;
 
 	private VertexArrayObject _vao = null!;
-	private BufferObject _quadVbo = null!;
-	private BufferObject _instanceVbo = null!;
-	private VertexArrayObject? _highlightVao = null;
-	private BufferObject? _highlightQuadVbo = null;
-	private BufferObject? _highlightInstanceVbo = null;
-	private VertexArrayObject _axisVao = null!;
-	private BufferObject _axisVbo = null!;
-	private BufferObject _instanceCellCoordVbo = null!;
+    private BufferObject _quadVbo = null!;
+    private BufferObject _instanceVbo = null!;
+    private VertexArrayObject? _highlightVao = null;
+    private BufferObject? _highlightQuadVbo = null;
+    private BufferObject? _highlightInstanceVbo = null;
+    private VertexArrayObject _axisVao = null!;
+    private BufferObject _axisVbo = null!;
+    private BufferObject _instanceCellCoordVbo = null!;
 
     private WorldState _world = null!;
     public WorldState World => _world;
+    // Debugging: ensure we only log hex-mode selection once to avoid spam
+    private bool _didLogHexMode = false;
 
-	private int _uViewProj;
-	private int _uCellSize;
-	private int _uGridSize;
-	private int _uShowGrid;
-	private int _uPixelsPerUnit;
-	private int _uGridThicknessPx;
-	private int _uCellIndices;
-	private int _uPalette;
-	private int _uSpeciesCount;
+    private int _uViewProj;
+    private int _uCellSize;
+    private int _uGridSize;
+    private int _uShowGrid;
+    private int _uPixelsPerUnit;
+    private int _uGridThicknessPx;
+    private int _uCellIndices;
+    private int _uPalette;
+    private int _uSpeciesCount;
     private int _uUseTrapezoid;
-	private int _uDiskCenter;
+    private int _uDiskCenter;
+    private int _uUseHex;
+    private int _uHexScale;
 
-	// Highlight shader uniforms
-	private int _uHViewProj;
-	private int _uHCellSize;
-	private int _uHUseTrapezoid;
-	private int _uHDiskCenter;
-	private int _uHTime;
-	private int _uHPixelsPerUnit;
-	private int _uHBorderThicknessPx;
-	private int _uHDotFreq;
-	private int _uHColorA;
-	private int _uHColorB;
-	private int _uHAlpha;
+    // Highlight shader uniforms
+    private int _uHViewProj;
+    private int _uHCellSize;
+    private int _uHUseTrapezoid;
+    private int _uHUseHex;
+    private int _uHDiskCenter;
+    private int _uHTime;
+    private int _uHPixelsPerUnit;
+    private int _uHBorderThicknessPx;
+    private int _uHDotFreq;
+    private int _uHColorA;
+    private int _uHColorB;
+    private int _uHAlpha;
 
-	// Controls for rendering options
-	public bool ShowGrid { get; set; } = false;
-	public bool ShowAxes { get; set; } = false;
+    // Controls for rendering options
+    public bool ShowGrid { get; set; } = false;
+    public bool ShowAxes { get; set; } = false;
 
 
     // When false, renderer will skip drawing; useful for pausing visual updates while
     // leaving simulation state intact. Default = true (drawing enabled).
     public bool DrawingEnabled { get; set; } = true;
 
-	public float GridThicknessPixels { get; set; } = 1.0f;
+    public float GridThicknessPixels { get; set; } = 1.0f;
 
-	private Vector2[] _instancePositions = [];
+    private Vector2[] _instancePositions = [];
 
     // Reusable upload buffers to avoid per-frame allocations
     private byte[]? _indexUploadBuffer;
@@ -83,176 +96,193 @@ public sealed class Renderer(float cellSize) : IDisposable {
     private float[] _highlightInstanceData = new float[4];
     private byte[]? _regionUploadBuffer;
 
-	// Per-cell color texture (RGBA8). Each cell maps to one texel.
-	// Per-cell species index texture (R8). Each cell stores a single byte index.
-	private int _cellIndexTex = 0;
-	// Palette texture storing RGBA8 colors in a 1xN texture.
-	private int _paletteTex = 0;
+    // Per-cell color texture (RGBA8). Each cell maps to one texel.
+    // Per-cell species index texture (R8). Each cell stores a single byte index.
+    private int _cellIndexTex = 0;
+    // Palette texture storing RGBA8 colors in a 1xN texture.
+    private int _paletteTex = 0;
 
-	// Cached flattened RGBA8 palette copied from WorldModel on species changes.
-	// Length = speciesCount * 4. Always at least one RGBA entry (fallback) to simplify shader lookups.
-	private byte[] _speciesPalette = [];
+    // Cached flattened RGBA8 palette copied from WorldModel on species changes.
+    // Length = speciesCount * 4. Always at least one RGBA entry (fallback) to simplify shader lookups.
+    private byte[] _speciesPalette = [];
 
     // default fallback color when palette empty
     private static readonly byte[] _defaultFallbackColor = [255, 255, 255, 255];
 
-	// Draw highlight overlay based on input state (hover or zone). Call this from app after Render.
-	public void DrawHighlight(Camera camera, Input.InputState input) {
-		if (_highlightShader == null || _highlightVao == null || _highlightInstanceVbo == null)
-			return;
+    // Draw highlight overlay based on input state (hover or zone). Call this from app after Render.
+    public void DrawHighlight(Camera camera, Input.InputState input) {
+        if (_highlightShader == null || _highlightVao == null || _highlightInstanceVbo == null)
+            return;
 
-		if (_world == null) return;
+        if (_world == null) return;
 
-		// Determine hover cell
-		var (X, Y)= input.GetHoverCell(camera, this);
-		int hoverX = X;
-		int hoverY = Y;
+        // Determine hover cell
+        var (X, Y)= input.GetHoverCell(camera, this);
+        int hoverX = X;
+        int hoverY = Y;
 
         int instanceCount = 0;
         // Reuse preallocated array to avoid allocations
         float[] instanceData = _highlightInstanceData;
 
-			if (input.GetPlacementMode() == PlacementMode.Pixel || !input.IsPlacing()) {
-				if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
-					instanceCount = 1;
-					// If disk topology, request world-centered instance data from the disk grid so highlight matches rendering
-					if (_world.ActiveLayer?.Grid is DiskCellGrid disk && _world.GridTopology == GridTopologies.GridTopology.SPIRAL) {
-						var inst = disk.GetCellWorldPosition(hoverX, hoverY, _cellSize);
-						instanceData[0] = inst.X;
-						instanceData[1] = inst.Y;
-						instanceData[2] = inst.Z;
-						instanceData[3] = inst.W;
-					} else {
-						instanceData[0] = hoverX * _cellSize;
-						instanceData[1] = hoverY * _cellSize;
-						instanceData[2] = 1.0f;
-						instanceData[3] = 1.0f;
-					}
-				}
-			} else {
-			var start = input.GetPlacementStart();
-			int sx = start.X;
-			int sy = start.Y;
-			if (sx >= 0 && sy >= 0) {
-				int minX = Math.Min(sx, hoverX);
-				int maxX = Math.Max(sx, hoverX);
-				int minY = Math.Min(sy, hoverY);
-				int maxY = Math.Max(sy, hoverY);
-				int w = maxX - minX + 1;
-				int h = maxY - minY + 1;
+        if (input.GetPlacementMode() == PlacementMode.Pixel || !input.IsPlacing()) {
+            if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
+                instanceCount = 1;
+                // If disk topology, request world-centered instance data from the disk grid so highlight matches rendering
+                if (_world.ActiveLayer?.Grid is DiskCellGrid disk && _world.GridTopology == GridTopologies.GridTopology.SPIRAL) {
+                    var inst = disk.GetCellWorldPosition(hoverX, hoverY, _cellSize);
+                    instanceData[0] = inst.X;
+                    instanceData[1] = inst.Y;
+                    instanceData[2] = inst.Z;
+                    instanceData[3] = inst.W;
+                } else {
+                    // For hex topology, compute the top-left of the hex bounding box so the
+                    // highlight quad aligns with renderer instance placement.
+                    if (_world.GridTopology == GridTopologies.GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
+                        float hexH = _cellSize * 0.86602540378f;
+                        float xStep = _cellSize * 0.75f;
+                        float cx = hoverX * xStep;
+                        float cy = hoverY * hexH + (((hoverX & 1) != 0) ? hexH * 0.5f : 0f);
+                        instanceData[0] = cx - (_cellSize * 0.5f);
+                        instanceData[1] = cy - (hexH * 0.5f);
+                    } else {
+                        instanceData[0] = hoverX * _cellSize;
+                        instanceData[1] = hoverY * _cellSize;
+                    }
+                    instanceData[2] = 1.0f;
+                    instanceData[3] = 1.0f;
+                }
+            }
+        } else {
+            var start = input.GetPlacementStart();
+            int sx = start.X;
+            int sy = start.Y;
+            if (sx >= 0 && sy >= 0) {
+                int minX = Math.Min(sx, hoverX);
+                int maxX = Math.Max(sx, hoverX);
+                int minY = Math.Min(sy, hoverY);
+                int maxY = Math.Max(sy, hoverY);
+                int w = maxX - minX + 1;
+                int h = maxY - minY + 1;
                 instanceCount = 1;
                 instanceData[0] = minX * _cellSize;
                 instanceData[1] = minY * _cellSize;
                 instanceData[2] = (float)w;
                 instanceData[3] = (float)h;
-			}
-		}
+            }
+        }
 
-		if (instanceCount == 0) return;
+        if (instanceCount == 0) return;
 
-		// Upload instance data (vec4 per instance: origin.x, origin.y, size.x, size.y)
+        // Use the highlight program and VAO first, then upload instance data so the VAO
+        // records the correct buffer binding on all drivers.
+        _highlightShader!.Use();
+        _highlightVao!.Bind();
+        // Upload instance data (vec4 per instance: origin.x, origin.y, size.x, size.y)
         _highlightInstanceVbo.Bind();
-		_highlightInstanceVbo.SetData<float>(instanceData, BufferUsageHint.DynamicDraw);
+        _highlightInstanceVbo.SetData<float>(instanceData, BufferUsageHint.DynamicDraw);
 
-		_highlightShader!.Use();
-		_highlightVao!.Bind();
+        var viewProj = camera.GetViewProjection();
+        if (_uHViewProj >= 0) GL.UniformMatrix4(_uHViewProj, false, ref viewProj);
+        if (_uHCellSize >= 0) GL.Uniform1(_uHCellSize, _cellSize);
+        if (_uHUseTrapezoid >= 0) GL.Uniform1(_uHUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+        if (_uHUseHex >= 0) GL.Uniform1(_uHUseHex, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
+        // pass disk center for highlight calculations
+        if (_uHDiskCenter >= 0) {
+            if (_world.ActiveLayer?.Grid is DiskCellGrid diskGrid) {
+                var dc = diskGrid.GetBackingGridCenter(_cellSize);
+                GL.Uniform2(_uHDiskCenter, ref dc);
+            } else {
+                Vector2 diskCenter = new Vector2(((_world.WidthCells - 1) * _cellSize) * 0.5f, ((_world.HeightCells - 1) * _cellSize) * 0.5f);
+                GL.Uniform2(_uHDiskCenter, ref diskCenter);
+            }
+        }
+        if (_uHTime >= 0) GL.Uniform1(_uHTime, (float)DateTime.Now.TimeOfDay.TotalSeconds);
+        if (_uHPixelsPerUnit >= 0) GL.Uniform1(_uHPixelsPerUnit, camera.Zoom);
+        if (_uHBorderThicknessPx >= 0) GL.Uniform1(_uHBorderThicknessPx, 2.0f);
+        if (_uHDotFreq >= 0) GL.Uniform1(_uHDotFreq, 4.0f);
+        if (_uHColorA >= 0) GL.Uniform3(_uHColorA, new OpenTK.Mathematics.Vector3(0f,0f,0f));
+        if (_uHColorB >= 0) GL.Uniform3(_uHColorB, new OpenTK.Mathematics.Vector3(1f,1f,1f));
+        if (_uHAlpha >= 0) GL.Uniform1(_uHAlpha, 1.0f);
 
-		var viewProj = camera.GetViewProjection();
-		GL.UniformMatrix4(_uHViewProj, false, ref viewProj);
-		GL.Uniform1(_uHCellSize, _cellSize);
-		GL.Uniform1(_uHUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
-		// pass disk center for highlight calculations
-			if (_world.ActiveLayer?.Grid is DiskCellGrid diskGrid) {
-				var dc = diskGrid.GetBackingGridCenter(_cellSize);
-				GL.Uniform2(_uHDiskCenter, ref dc);
-			} else {
-				Vector2 diskCenter = new Vector2(((_world.WidthCells - 1) * _cellSize) * 0.5f, ((_world.HeightCells - 1) * _cellSize) * 0.5f);
-				GL.Uniform2(_uHDiskCenter, ref diskCenter);
-			}
-		GL.Uniform1(_uHTime, (float)DateTime.Now.TimeOfDay.TotalSeconds);
-		GL.Uniform1(_uHPixelsPerUnit, camera.Zoom);
-		GL.Uniform1(_uHBorderThicknessPx, 2.0f);
-		GL.Uniform1(_uHDotFreq, 4.0f);
-		GL.Uniform3(_uHColorA, new OpenTK.Mathematics.Vector3(0f,0f,0f));
-		GL.Uniform3(_uHColorB, new OpenTK.Mathematics.Vector3(1f,1f,1f));
-		GL.Uniform1(_uHAlpha, 1.0f);
+        // Ensure blending is enabled for highlight overlays (some topology draws disable blending)
+        bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
+        if (!wasBlendEnabled) GL.Enable(EnableCap.Blend);
 
-		GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 4, instanceCount);
-	}
+        GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 4, instanceCount);
 
-	public void Initialize() {
+        if (!wasBlendEnabled) GL.Disable(EnableCap.Blend);
+    }
+
+    public void Initialize() {
 		GL.ClearColor(0.08f, 0.08f, 0.10f, 1.0f);
 		GL.Enable(EnableCap.Blend);
 		GL.BlendFunc(BlendingFactor.SrcAlpha, BlendingFactor.OneMinusSrcAlpha);
 
-		_shader = new ShaderProgram(Shaders.GridVertex, Shaders.GridFragment);
+        // Build shader variants for each topology. By default compile
+        // a rectangular shader (fast path) and a hex-specific fragment
+        // variant that enforces a precise hex interior. The disk/trapezoid
+        // topology uses the rectangular fragment but will enable trapezoid
+        // behaviour via a uniform on the shared vertex shader.
 
-		_uViewProj = _shader.GetUniformLocation("uViewProj");
-		_uCellSize = _shader.GetUniformLocation("uCellSize");
-		_uGridSize = _shader.GetUniformLocation("uGridSize");
-		_uShowGrid = _shader.GetUniformLocation("uShowGrid");
-		_uPixelsPerUnit = _shader.GetUniformLocation("uPixelsPerUnit");
-		_uGridThicknessPx = _shader.GetUniformLocation("uGridThicknessPx");
-		_uCellIndices = _shader.GetUniformLocation("uCellIndices");
-		_uPalette = _shader.GetUniformLocation("uPalette");
-		_uSpeciesCount = _shader.GetUniformLocation("uSpeciesCount");
+        // Build shader programs per-topology using the split shader sources.
+        _shaderRect = new ShaderProgram(Shaders.GridVertexRect, Shaders.GridFragmentRect);
+        _shaderHex = new ShaderProgram(Shaders.GridVertexHex, Shaders.GridFragmentHex);
+        _shaderDisk = new ShaderProgram(Shaders.GridVertexDisk, Shaders.GridFragmentRect);
 
-		_uUseTrapezoid = _shader.GetUniformLocation("uUseTrapezoid");
-		_uDiskCenter = _shader.GetUniformLocation("uDiskCenter");
+		// Default active shader is rectangular
+		SetActiveGridShader(_shaderRect);
+
+		// Now create VAO/VBOs and other GL objects once. These do not depend on
+		// the specific shader variant but must be created after a program exists
+		// so attribute locations are stable on older GL implementations.
 
 		_vao = new VertexArrayObject();
 		_vao.Bind();
 
 		// A unit quad in local space (0 to 1), the shader scales by cell size.
-        _quadVbo = new BufferObject(BufferTarget.ArrayBuffer);
-        _quadVbo.SetData<Vector2>([
-            new Vector2(0, 0),
-            new Vector2(1, 0),
-            new Vector2(1, 1),
-            new Vector2(0, 1),
-        ], BufferUsageHint.StaticDraw);
+		_quadVbo = new BufferObject(BufferTarget.ArrayBuffer);
+		_quadVbo.SetData<Vector2>([
+			new Vector2(0, 0),
+			new Vector2(1, 0),
+			new Vector2(1, 1),
+			new Vector2(0, 1),
+		], BufferUsageHint.StaticDraw);
 
 		GL.EnableVertexAttribArray(0);
 		GL.VertexAttribPointer(0, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
 
-        // Instance VBO will contain per-instance attributes. We'll use two attributes:
-        // attrib 1 (vec4): origin.x, origin.y, angle, pad
-        // attrib 2 (vec2): cellX, cellY (logical coords)
-        _instanceVbo = new BufferObject(BufferTarget.ArrayBuffer);
+		// Instance VBO will contain per-instance attributes. We'll use two attributes:
+		// attrib 1 (vec4): origin.x, origin.y, angle, pad
+		// attrib 2 (vec2): cellX, cellY (logical coords)
+		_instanceVbo = new BufferObject(BufferTarget.ArrayBuffer);
 
-        // IMPORTANT: bind the instance VBO before setting the vertex attrib pointer
-        // so the VAO records the correct buffer binding for attribute 1.
-        _instanceVbo.Bind();
+		// IMPORTANT: bind the instance VBO before setting the vertex attrib pointer
+		// so the VAO records the correct buffer binding for attribute 1.
+		_instanceVbo.Bind();
 
-        GL.EnableVertexAttribArray(1);
-        GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, sizeof(float) * 4, 0);
-        GL.VertexAttribDivisor(1, 1);
+		GL.EnableVertexAttribArray(1);
+		GL.VertexAttribPointer(1, 4, VertexAttribPointerType.Float, false, sizeof(float) * 4, 0);
+		GL.VertexAttribDivisor(1, 1);
 
-        // We'll bind a second attribute from a separate VBO for cell coords.
-        // Create a small VBO for the logical coords (vec2 per instance).
-        _instanceCellCoordVbo = new BufferObject(BufferTarget.ArrayBuffer);
-        _instanceCellCoordVbo.Bind();
-        GL.EnableVertexAttribArray(2);
-        GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
-        GL.VertexAttribDivisor(2, 1);
+		// We'll bind a second attribute from a separate VBO for cell coords.
+		// Create a small VBO for the logical coords (vec2 per instance).
+		_instanceCellCoordVbo = new BufferObject(BufferTarget.ArrayBuffer);
+		_instanceCellCoordVbo.Bind();
+		GL.EnableVertexAttribArray(2);
+		GL.VertexAttribPointer(2, 2, VertexAttribPointerType.Float, false, sizeof(float) * 2, 0);
+		GL.VertexAttribDivisor(2, 1);
 
-		// Axis shader and buffers (lines from origin along +X and +Y)
-		_axisShader = new ShaderProgram(Shaders.AxisVertex, Shaders.AxisFragment);
+        // Axis shader and buffers (lines from origin along +X and +Y)
+        _axisShader = new ShaderProgram(Shaders.AxisVertex, Shaders.AxisFragment);
 
-		// Highlight shader
-		_highlightShader = new ShaderProgram(Shaders.HighlightVertex, Shaders.HighlightFragment);
-
-		_uHViewProj = _highlightShader.GetUniformLocation("uViewProj");
-		_uHCellSize = _highlightShader.GetUniformLocation("uCellSize");
-		_uHUseTrapezoid = _highlightShader.GetUniformLocation("uUseTrapezoid");
-		_uHDiskCenter = _highlightShader.GetUniformLocation("uDiskCenter");
-		_uHTime = _highlightShader.GetUniformLocation("uTime");
-		_uHPixelsPerUnit = _highlightShader.GetUniformLocation("uPixelsPerUnit");
-		_uHBorderThicknessPx = _highlightShader.GetUniformLocation("uBorderThicknessPx");
-		_uHDotFreq = _highlightShader.GetUniformLocation("uDotFrequency");
-		_uHColorA = _highlightShader.GetUniformLocation("uColorA");
-		_uHColorB = _highlightShader.GetUniformLocation("uColorB");
-		_uHAlpha = _highlightShader.GetUniformLocation("uAlpha");
+        // Build highlight shader variants
+        _highlightShaderRect = new ShaderProgram(Shaders.HighlightVertexRect, Shaders.HighlightFragmentRect);
+        _highlightShaderHex = new ShaderProgram(Shaders.HighlightVertexHex, Shaders.HighlightFragmentHex);
+        _highlightShaderDisk = new ShaderProgram(Shaders.HighlightVertexDisk, Shaders.HighlightFragmentRect);
+        
+        // store one of them in the nullable holder for legacy references
+        SetActiveHighlightShader(_highlightShaderRect);
 
 		_axisVao = new VertexArrayObject();
 		_axisVao.Bind();
@@ -299,7 +329,69 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		// Create and upload per-cell color texture for the new world.
 		EnsureIndexAndPaletteTextures(_world.WidthCells, _world.HeightCells);
 		UploadGridToTexture(_world.ActiveLayer.Grid);
+
+		// Select appropriate shader variant for this world's topology.
+		switch (_world.GridTopology) {
+			case GridTopologies.GridTopology.HEX:
+				SetActiveGridShader(_shaderHex);
+				SetActiveHighlightShader(_highlightShaderHex);
+				break;
+			case GridTopologies.GridTopology.SPIRAL:
+				SetActiveGridShader(_shaderDisk);
+				SetActiveHighlightShader(_highlightShaderDisk);
+				break;
+			default:
+				SetActiveGridShader(_shaderRect);
+				SetActiveHighlightShader(_highlightShaderRect);
+				break;
+		}
 	}
+
+	private void SetActiveGridShader(ShaderProgram shader) {
+		_shader = shader ?? throw new ArgumentNullException(nameof(shader));
+		// Query uniform locations on the active shader program so later Uniform calls
+		// write to the correct program without needing to rebind every time.
+		_uViewProj = _shader.GetUniformLocation("uViewProj");
+		_uCellSize = _shader.GetUniformLocation("uCellSize");
+		_uGridSize = _shader.GetUniformLocation("uGridSize");
+		_uShowGrid = _shader.GetUniformLocation("uShowGrid");
+		_uPixelsPerUnit = _shader.GetUniformLocation("uPixelsPerUnit");
+		_uGridThicknessPx = _shader.GetUniformLocation("uGridThicknessPx");
+		_uCellIndices = _shader.GetUniformLocation("uCellIndices");
+		_uPalette = _shader.GetUniformLocation("uPalette");
+		_uSpeciesCount = _shader.GetUniformLocation("uSpeciesCount");
+		_uUseTrapezoid = _shader.GetUniformLocation("uUseTrapezoid");
+		_uDiskCenter = _shader.GetUniformLocation("uDiskCenter");
+		_uUseHex = _shader.GetUniformLocation("uUseHex");
+		// optional uniform to control hex scaling in shader
+		_uHexScale = _shader.GetUniformLocation("uHexScale");
+
+	}
+
+    private void SetActiveHighlightShader(ShaderProgram? shader) {
+        _highlightShader = shader;
+        if (shader == null) return;
+        _uHViewProj = shader.GetUniformLocation("uViewProj");
+        _uHCellSize = shader.GetUniformLocation("uCellSize");
+        _uHUseTrapezoid = shader.GetUniformLocation("uUseTrapezoid");
+        _uHUseHex = shader.GetUniformLocation("uUseHex");
+        _uHDiskCenter = shader.GetUniformLocation("uDiskCenter");
+        _uHTime = shader.GetUniformLocation("uTime");
+        _uHPixelsPerUnit = shader.GetUniformLocation("uPixelsPerUnit");
+        _uHBorderThicknessPx = shader.GetUniformLocation("uBorderThicknessPx");
+        _uHDotFreq = shader.GetUniformLocation("uDotFrequency");
+        _uHColorA = shader.GetUniformLocation("uColorA");
+        _uHColorB = shader.GetUniformLocation("uColorB");
+        _uHAlpha = shader.GetUniformLocation("uAlpha");
+        // Bind the program and initialize sensible defaults so the highlight is visible
+        shader.Use();
+        if (_uHCellSize >= 0) GL.Uniform1(_uHCellSize, _cellSize);
+        if (_uHAlpha >= 0) GL.Uniform1(_uHAlpha, 1.0f);
+        if (_uHBorderThicknessPx >= 0) GL.Uniform1(_uHBorderThicknessPx, 2.0f);
+        if (_uHDotFreq >= 0) GL.Uniform1(_uHDotFreq, 4.0f);
+        if (_uHColorA >= 0) GL.Uniform3(_uHColorA, new Vector3(0f, 0f, 0f));
+        if (_uHColorB >= 0) GL.Uniform3(_uHColorB, new Vector3(1f, 1f, 1f));
+    }
 
 	public static void Resize(int width, int height) {
 		GL.Viewport(0, 0, width, height);
@@ -329,6 +421,11 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 		_shader.Use();
 		_vao.Bind();
+		if (_world.GridTopology == GridTopologies.GridTopology.HEX) {
+			if (!_didLogHexMode) { Logger.Info("Renderer: HEX topology active - using hex fragment path."); _didLogHexMode = true; }
+		} else {
+			if (_didLogHexMode) { Logger.Info("Renderer: EXITTED HEX topology."); _didLogHexMode = false; }
+		}
 
 		var viewProj = camera.GetViewProjection();
 		GL.UniformMatrix4(_uViewProj, false, ref viewProj);
@@ -353,6 +450,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		GL.Uniform1(_uShowGrid, ShowGrid ? 1 : 0);
 		GL.Uniform1(_uPixelsPerUnit, camera.Zoom);
 		GL.Uniform1(_uGridThicknessPx, GridThicknessPixels);
+		GL.Uniform1(_uUseHex, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
 
 		// Bind per-cell index texture to unit 0 and palette to unit 1
 		if (_cellIndexTex != 0) {
@@ -367,9 +465,17 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		}
 		GL.Uniform1(_uSpeciesCount, _speciesPalette.Length / 4);
 
-		// Draw as triangle fan per quad, instanced.
-		// Later, you can draw only visible tiles for big worlds.
-		GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 4, _instancePositions.Length);
+        // Draw as triangle fan per quad, instanced.
+        // For hex topology we disable blending so discarded fragments do not blend
+        // with underlying quads (prevents rectangular alpha artifacts).
+        bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
+        if (_world.GridTopology == GridTopologies.GridTopology.HEX) {
+            GL.Disable(EnableCap.Blend);
+        }
+        GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 4, _instancePositions.Length);
+        if (_world.GridTopology == GridTopologies.GridTopology.HEX && wasBlendEnabled) {
+            GL.Enable(EnableCap.Blend);
+        }
 
 		// Draw axes: X in red, Y in green
 		if (_axisVbo != null && ShowAxes) {
@@ -380,11 +486,11 @@ public sealed class Renderer(float cellSize) : IDisposable {
 			GL.UniformMatrix4(uViewProjAxis, false, ref viewProj);
 
 			// X axis (first line)
-			GL.Uniform3(uColor, new OpenTK.Mathematics.Vector3(1.0f, 0.1f, 0.1f));
+			GL.Uniform3(uColor, new Vector3(1.0f, 0.1f, 0.1f));
 			GL.DrawArrays(PrimitiveType.Lines, 0, 2);
 
 			// Y axis (second line)
-			GL.Uniform3(uColor, new OpenTK.Mathematics.Vector3(0.1f, 1.0f, 0.1f));
+			GL.Uniform3(uColor, new Vector3(0.1f, 1.0f, 0.1f));
 			GL.DrawArrays(PrimitiveType.Lines, 2, 2);
 		}
 	}
@@ -524,6 +630,31 @@ public sealed class Renderer(float cellSize) : IDisposable {
                     cellCoords.Add(p);
                 }
             }
+        } else if (grid is HexCellGrid hex) {
+            int w = _world.WidthCells;
+            int h = _world.HeightCells;
+            var posList = new List<Vector2>();
+            float hexH = _cellSize * 0.86602540378f; // sqrt(3)/2
+            float xStep = _cellSize * 0.75f; // horizontal spacing between centers
+            for (int y = 0; y < h; y++) {
+                for (int x = 0; x < w; x++) {
+                    if (!hex.IsValidCell(x, y)) continue;
+                    // compute center for flat-top hex
+                    float cx = x * xStep;
+                    float cy = y * hexH + (((x & 1) != 0) ? hexH * 0.5f : 0f);
+                    // origin = top-left of bounding box
+                    float ox = cx - (_cellSize * 0.5f);
+                    float oy = cy - (hexH * 0.5f);
+                    posList.Add(new Vector2(ox, oy));
+                    instances.Add(ox);
+                    instances.Add(oy);
+                    instances.Add(0f);
+                    instances.Add(0f);
+                    cellCoords.Add(x);
+                    cellCoords.Add(y);
+                }
+            }
+            _instancePositions = posList.ToArray();
         } else {
             int w = _world.WidthCells;
             int h = _world.HeightCells;

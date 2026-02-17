@@ -70,16 +70,22 @@ public sealed class InputState {
         float cs = renderer.CellSize;
         // If renderer/world indicate a spiral topology, ask the DiskCellGrid to map world coords -> (ring,pos).
         var world = renderer.World;
+
         if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL) {
             if (world.ActiveLayer?.Grid is World.CellGrid.DiskCellGrid disk) {
-                var mapped = disk.MapWorldToCell(worldPos, cs);
-                return (mapped.X, mapped.Y);
+                var (X, Y) = disk.MapWorldToCell(worldPos, cs);
+                return (X, Y);
             }
+        } else if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.HEX) {
+            if (world.ActiveLayer?.Grid is World.CellGrid.HexCellGrid hex) {
+                var (X, Y) = hex.MapWorldToCell(worldPos, cs);
+                return (X, Y);
+            }
+        } else {
+            int cellX = (int) Math.Floor(worldPos.X / cs);
+            int cellY = (int) Math.Floor(worldPos.Y / cs);
+            return (cellX, cellY);
         }
-
-        int cellX = (int)Math.Floor(worldPos.X / cs);
-        int cellY = (int)Math.Floor(worldPos.Y / cs);
-        return (cellX, cellY);
     }
 	
     public void SetPlacementMode(PlacementMode mode) => _placementMode = mode;
@@ -142,15 +148,29 @@ public sealed class InputState {
         float cs = renderer.CellSize;
         int cellX, cellY;
         var world = renderer.World;
-        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL && world.ActiveLayer?.Grid is Biome2.World.CellGrid.DiskCellGrid disk) {
-            var mapped = disk.MapWorldToCell(worldPos, cs);
-            cellX = mapped.X; cellY = mapped.Y;
-        } else {
-            cellX = (int)Math.Floor(worldPos.X / cs);
-            cellY = (int)Math.Floor(worldPos.Y / cs);
-        }
 
-        if (_placementMode == PlacementMode.Pixel) {
+		switch (world.GridTopology) {
+			case World.CellGrid.GridTopologies.GridTopology.SPIRAL when world.ActiveLayer?.Grid is World.CellGrid.DiskCellGrid disk: {
+				var (X, Y) = disk.MapWorldToCell(worldPos, cs);
+				cellX = X;
+				cellY = Y;
+				break;
+			}
+
+			case World.CellGrid.GridTopologies.GridTopology.HEX when world.ActiveLayer?.Grid is World.CellGrid.HexCellGrid hex: {
+				var (X, Y) = hex.MapWorldToCell(worldPos, cs);
+				cellX = X;
+				cellY = Y;
+				break;
+			}
+
+			default:
+				cellX = (int) Math.Floor(worldPos.X / cs);
+				cellY = (int) Math.Floor(worldPos.Y / cs);
+				break;
+		}
+
+		if (_placementMode == PlacementMode.Pixel) {
             if (!_placing || cellX != _lastPlacedX || cellY != _lastPlacedY) {
                 // snapshot selected species indices
                 var sel = _selectedSpecies;
@@ -177,21 +197,35 @@ public sealed class InputState {
         }
     }
 
-    private void FinalizeZonePlacement(Graphics.Camera camera, Graphics.Renderer renderer, Simulation.SimulationController simulation) {
+    private void FinalizeZonePlacement(Camera camera, Renderer renderer, Simulation.SimulationController simulation) {
         // compute end cell from current mouse
-        var worldPos = camera.ScreenToWorld(new OpenTK.Mathematics.Vector2(MouseX, MouseY), camera.Zoom);
+        var worldPos = camera.ScreenToWorld(new Vector2(MouseX, MouseY), camera.Zoom);
         float cs = renderer.CellSize;
         int endX, endY;
         var world = renderer.World;
-        if (world != null && world.GridTopology == Biome2.World.CellGrid.GridTopologies.GridTopology.SPIRAL && world.ActiveLayer?.Grid is Biome2.World.CellGrid.DiskCellGrid disk) {
-            var mapped = disk.MapWorldToCell(worldPos, cs);
-            endX = mapped.X; endY = mapped.Y;
-        } else {
-            endX = (int)Math.Floor(worldPos.X / cs);
-            endY = (int)Math.Floor(worldPos.Y / cs);
-        }
 
-        int startX = _lastPlacedX;
+		switch (world.GridTopology) {
+			case World.CellGrid.GridTopologies.GridTopology.SPIRAL when world.ActiveLayer?.Grid is World.CellGrid.DiskCellGrid disk: {
+				var (X, Y) = disk.MapWorldToCell(worldPos, cs);
+				endX = X;
+				endY = Y;
+				break;
+			}
+
+			case World.CellGrid.GridTopologies.GridTopology.HEX when world.ActiveLayer?.Grid is World.CellGrid.HexCellGrid hex: {
+				var (X, Y) = hex.MapWorldToCell(worldPos, cs);
+				endX = X;
+				endY = Y;
+				break;
+			}
+
+			default:
+				endX = (int) Math.Floor(worldPos.X / cs);
+				endY = (int) Math.Floor(worldPos.Y / cs);
+				break;
+		}
+
+		int startX = _lastPlacedX;
         int startY = _lastPlacedY;
         if (startX < 0 || startY < 0) return;
 

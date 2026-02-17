@@ -67,7 +67,7 @@ public sealed class SimulationController : IDisposable {
     /// supplied dimensions overriding the file values. Otherwise a blank world
     /// will be created with the requested size and the current layer count.
     /// </summary>
-    public void RestartWorld(int width, int height)
+    public void RestartWorld(int width, int height, int depth)
     {
         // If we have a last applied request, re-apply it but override sizing.
         if (_lastWorldModel != null)
@@ -75,6 +75,7 @@ public sealed class SimulationController : IDisposable {
             var req = new WorldModel(
                 width: Math.Max(1, width),
                 height: Math.Max(1, height),
+                depth: Math.Max(1, depth),
                 paused: _lastWorldModel.Paused,
                 species: _lastWorldModel.Species,
                 layers: _lastWorldModel.Layers,
@@ -199,11 +200,14 @@ public sealed class SimulationController : IDisposable {
         // Determine sizing: prefer file-provided positive values, otherwise keep current world values.
         int newWidth = worldModel.Width > 0 ? worldModel.Width : Math.Max(1, _world.WidthCells);
         int newHeight = worldModel.Height > 0 ? worldModel.Height : Math.Max(1, _world.HeightCells);
-        int newLayerCount = (worldModel.Layers != null && worldModel.Layers.Count > 0) ? worldModel.Layers.Count : Math.Max(1, _world.LayerCount);
+        int newDepth = worldModel.HexDepth > 0 ? worldModel.HexDepth : Math.Max(1, _world.DepthCells);
+        
+		int newLayerCount = (worldModel.Layers != null && worldModel.Layers.Count > 0) ? worldModel.Layers.Count : Math.Max(1, _world.LayerCount);
 
         // Construct new runtime world state using requested topology.
         var topology = worldModel.GridTopology;
-        var newWorld = new WorldState(newWidth, newHeight, newLayerCount, topology);
+
+		var newWorld = new WorldState(newWidth, newHeight, newLayerCount, topology, newDepth);
 
         // Preserve previously selected active layer index where possible so the view
         // remains on the same layer after applying new rules (unless the new world

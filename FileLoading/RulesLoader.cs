@@ -456,7 +456,7 @@ public sealed class RulesLoader {
         }
 
         // apply settings
-        int w = 0, h = 0;
+        int w = 0, h = 0, d = 0;
         bool paused = false;
         var edgesMode = EdgeMode.BORDER;
         var gridTopology = GridTopology.RECT;
@@ -464,11 +464,16 @@ public sealed class RulesLoader {
 			_=int.TryParse(ws, out w);
         if (settings.TryGetValue("HEIGHT", out var hs))
 			_=int.TryParse(hs, out h);
+        if (settings.TryGetValue("DEPTH", out var ds))
+            _=int.TryParse(ds, out d);
         if (settings.TryGetValue("SHAPE", out var shape)) {
             if (!string.IsNullOrEmpty(shape) && string.Equals(shape.Trim(), "SPIRAL", StringComparison.OrdinalIgnoreCase)) {
                 gridTopology = GridTopology.SPIRAL;
                 Logger.Info("Using SPIRAL grid topology as per SHAPE setting.");
-			}
+            } else if (!string.IsNullOrEmpty(shape) && string.Equals(shape.Trim(), "HEX", StringComparison.OrdinalIgnoreCase)) {
+                gridTopology = GridTopology.HEX;
+                Logger.Info("Using HEX grid topology as per SHAPE setting.");
+            }
         }
         if (settings.TryGetValue("PAUSE", out var ps))
             paused = ps != "0";
@@ -478,10 +483,14 @@ public sealed class RulesLoader {
             }
         }
 
-        // produce final world file model with parsed data (file-loading WorldModel)
-        var final = new WorldModel(
+        if (gridTopology == GridTopology.HEX && d == 0)
+            d = 1; // default hex depth to 1 if not specified
+
+		// produce final world file model with parsed data (file-loading WorldModel)
+		var final = new WorldModel(
             width: w,
             height: h,
+            depth: d,
             paused: paused,
             species: species,
             layers: layers,

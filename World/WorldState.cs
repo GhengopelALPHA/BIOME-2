@@ -20,6 +20,7 @@ public sealed class WorldState {
 
 	public int WidthCells { get; }
 	public int HeightCells { get; }
+	public int DepthCells { get; }
 	public int LayerCount { get; }
 
 	private readonly List<WorldLayer> _layers = [];
@@ -58,10 +59,11 @@ public sealed class WorldState {
 
     public GridTopologies.GridTopology GridTopology { get; }
 
-    public WorldState(int widthCells, int heightCells, int layerCount, GridTopologies.GridTopology topology = GridTopologies.GridTopology.RECT) {
+    public WorldState(int widthCells, int heightCells, int layerCount, GridTopologies.GridTopology topology = GridTopologies.GridTopology.RECT, int depthCells = 1) {
 		// bound checking
 		var _widthCells = widthCells;
 		var _heightCells = heightCells;
+		var _depthCells = depthCells;
 		var _layerCount = layerCount;
 
 		if (widthCells <= 0) {
@@ -72,6 +74,10 @@ public sealed class WorldState {
 			Logger.Error("HeightCells must be positive.");
 			_heightCells = 1;
 		}
+		if (depthCells <= 0) {
+			Logger.Error("DepthCells must be positive.");
+			_depthCells = 1;
+		}
 		if (layerCount <= 0) {
 			Logger.Error("LayerCount must be positive.");
 			_layerCount = 1;
@@ -79,15 +85,16 @@ public sealed class WorldState {
 
         WidthCells = _widthCells;
         HeightCells = _heightCells;
-        LayerCount = _layerCount;
-		GridTopology = topology;
+		DepthCells = _depthCells;
+		LayerCount = _layerCount;
+        GridTopology = topology;
 
 		CreateLayers();
 	}
 
     private void CreateLayers() {
         for (int i = 0; i < LayerCount; i++) {
-            _layers.Add(new WorldLayer($"Layer {i}", WidthCells, HeightCells, GridTopology));
+            _layers.Add(new WorldLayer($"Layer {i}", WidthCells, HeightCells, GridTopology, DepthCells));
         }
     }
 

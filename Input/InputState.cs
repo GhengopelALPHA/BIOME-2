@@ -4,6 +4,7 @@ using OpenTK.Mathematics;
 using static Biome2.Input.PlacementModes;
 using Biome2.Graphics;
 using Biome2.World;
+using Biome2.World.CellGrid;
 
 namespace Biome2.Input;
 
@@ -193,14 +194,14 @@ public sealed class InputState {
         var world = renderer.World;
 
 		switch (world.GridTopology) {
-			case World.CellGrid.GridTopologies.GridTopology.SPIRAL when world.ActiveLayer?.Grid is World.CellGrid.DiskCellGrid disk: {
+			case GridTopology.SPIRAL when world.ActiveLayer?.Grid is DiskCellGrid disk: {
 				var (X, Y) = disk.MapWorldToCell(worldPos, cs);
 				endX = X;
 				endY = Y;
 				break;
 			}
 
-			case World.CellGrid.GridTopologies.GridTopology.HEX when world.ActiveLayer?.Grid is World.CellGrid.HexCellGrid hex: {
+			case GridTopology.HEX when world.ActiveLayer?.Grid is HexCellGrid hex: {
 				var (X, Y) = hex.MapWorldToCell(worldPos, cs);
 				endX = X;
 				endY = Y;

@@ -1,7 +1,4 @@
 ﻿using Biome2.Diagnostics;
-using System;
-using System.Linq;
-using OpenTK.Mathematics;
 using Biome2.FileLoading.Models;
 
 using Biome2.World.CellGrid;
@@ -57,9 +54,9 @@ public sealed class WorldState {
     // defined, an empty array is provided.
     public event Action<byte[]>? SpeciesPaletteChanged;
 
-    public GridTopologies.GridTopology GridTopology { get; }
+    public GridTopology GridTopology { get; }
 
-    public WorldState(int widthCells, int heightCells, int layerCount, GridTopologies.GridTopology topology = GridTopologies.GridTopology.RECT, int depthCells = 1) {
+    public WorldState(int widthCells, int heightCells, int layerCount, GridTopology topology = GridTopology.RECT, int depthCells = 1) {
 		// bound checking
 		var _widthCells = widthCells;
 		var _heightCells = heightCells;

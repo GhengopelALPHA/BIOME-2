@@ -1,6 +1,4 @@
-using System;
 using OpenTK.Mathematics;
-using Biome2.FileLoading;
 
 namespace Biome2.World.CellGrid;
 

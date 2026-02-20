@@ -11,13 +11,13 @@ public sealed class WorldLayer {
     public string Name { get; set; }
     public ICellGrid Grid { get; }
 
-    public WorldLayer(string name, int widthCells, int heightCells, GridTopologies.GridTopology topology = GridTopologies.GridTopology.RECT, int depth = 1) {
+    public WorldLayer(string name, int widthCells, int heightCells, GridTopology topology = GridTopology.RECT, int depth = 1) {
         Name = name;
         switch (topology) {
-            case GridTopologies.GridTopology.SPIRAL:
+            case GridTopology.SPIRAL:
                 Grid = new DiskCellGrid(widthCells, heightCells);
                 break;
-            case GridTopologies.GridTopology.HEX:
+            case GridTopology.HEX:
                 Grid = new HexCellGrid(widthCells, heightCells, depth);
                 break;
             default:

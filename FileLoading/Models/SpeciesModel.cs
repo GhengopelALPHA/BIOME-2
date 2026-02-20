@@ -1,6 +1,4 @@
 ﻿using Biome2.Diagnostics;
-using OpenTK.Mathematics;
-using System;
 
 namespace Biome2.FileLoading.Models;
 

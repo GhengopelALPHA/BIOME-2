@@ -1,15 +1,10 @@
 using Biome2.Diagnostics;
 using Biome2.Simulation;
 using Biome2.World;
+using Biome2.World.CellGrid;
 using ImGuiNET;
-using System;
-using System.Globalization;
-using System.IO;
 using System.Numerics;
-using System.Windows.Forms;
-using static Biome2.Input.InputState;
 using static Biome2.Input.PlacementModes;
-using static System.ComponentModel.Design.ObjectSelectorEditor;
 
 namespace Biome2.Graphics.UI;
 
@@ -188,13 +183,13 @@ internal sealed class ToolboxWindow
         ImGui.PushItemWidth(120);
         string widthLabel = "Width";
         string heightLabel = "Height";
-        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.SPIRAL) {
+        if (world != null && world.GridTopology == GridTopology.SPIRAL) {
             widthLabel = "Rings";
             heightLabel = "Outers";
         }
         ImGui.InputInt(widthLabel, ref _gridWidth, 1, 5);
         ImGui.InputInt(heightLabel, ref _gridHeight, 1, 5);
-        if (world != null && world.GridTopology == World.CellGrid.GridTopologies.GridTopology.HEX) {
+        if (world != null && world.GridTopology == GridTopology.HEX) {
             ImGui.InputInt("Depth", ref _gridDepth, 1, 5);
 		}
         if (_gridWidth < 1)

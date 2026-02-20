@@ -1,6 +1,4 @@
-﻿using System;
-using System.IO;
-using System.Globalization;
+﻿using System.Globalization;
 
 namespace Biome2.Diagnostics;
 
@@ -61,7 +59,7 @@ public sealed class Performance {
     {
         try {
             string fileName = string.IsNullOrEmpty(rulesFilePath) ? "<none>" : Path.GetFileName(rulesFilePath);
-            string logLine = string.Format(System.Globalization.CultureInfo.InvariantCulture, "{0}\t {1:yyyy-MM-dd HH:mm:ss}\t TPS: {2:F2}", fileName, DateTime.Now, MaxTicksPerSecond);
+            string logLine = string.Format(CultureInfo.InvariantCulture, "{0}\t {1:yyyy-MM-dd HH:mm:ss}\t TPS: {2:F2}", fileName, DateTime.Now, MaxTicksPerSecond);
             string outPath = Path.Combine(AppContext.BaseDirectory ?? ".", "tps_stats.txt");
             File.AppendAllText(outPath, logLine + Environment.NewLine);
             Logger.Info($"Saved TPS stats to '{outPath}'.");

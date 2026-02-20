@@ -1,4 +1,4 @@
-﻿using static Biome2.World.CellGrid.GridTopologies;
+﻿using Biome2.World.CellGrid;
 
 namespace Biome2.FileLoading.Models;
 
@@ -9,17 +9,7 @@ namespace Biome2.FileLoading.Models;
 /// </summary>
 public sealed class WorldModel {
     // Parsed settings
-    public int Width { get; init; }
-    public int Height { get; init; }
-	// Hex-specific parameter: third dimension (z-depth) for hex layouts.
-	// Interpreted by world creation when GridType == Hexagonal.
-	public int HexDepth { get; init; } = 0;
-
-	public bool Paused { get; init; }
-
-	// Topology: optional, defaults to rectangular for backward compatibility.
-	public GridTopology GridTopology { get; init; } = GridTopology.RECT;
-
+    public WorldConfigModel Config { get; init; }
 
 	// Species definitions (name -> color)
 	public IReadOnlyList<SpeciesModel> Species { get; init; } = [];
@@ -30,28 +20,16 @@ public sealed class WorldModel {
     // Parsed rules
     public IReadOnlyList<RulesModel> Rules { get; init; } = [];
     
-    // Edge handling mode for neighbor queries
-    public EdgeMode Edges { get; init; } = EdgeMode.BORDER;
 
     public WorldModel(
-        int width,
-        int height,
-        int depth,
-        bool paused,
-        IReadOnlyList<SpeciesModel> species,
+        WorldConfigModel config,
+		IReadOnlyList<SpeciesModel> species,
         IReadOnlyList<string> layers,
-        IReadOnlyList<RulesModel> rules,
-        EdgeMode edges = EdgeMode.BORDER,
-        GridTopology topology = GridTopology.RECT
+        IReadOnlyList<RulesModel> rules
 	) {
-        Width = width;
-        Height = height;
-		HexDepth = depth;
-        Paused = paused;
+        Config = config;
         Species = species ?? [];
         Layers = layers ?? [];
         Rules = rules ?? [];
-        Edges = edges;
-        GridTopology = topology;
 	}
 }

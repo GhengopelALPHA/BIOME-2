@@ -60,17 +60,11 @@ public sealed class Renderer(float cellSize) : IDisposable {
     private int _uUseTrapezoid;
     private int _uDiskCenter;
     private int _uUseHex;
-    private int _uHexScale;
 
     // Highlight shader uniforms
-    private int _uHViewProj;
     private int _uHCellSize;
-    private int _uHUseTrapezoid;
-    private int _uHUseHex;
     private int _uHDiskCenter;
     private int _uHUseRect;
-    private int _uHTime;
-    private int _uHPixelsPerUnit;
     private int _uHBorderThicknessPx;
     private int _uHDotFreq;
     private int _uHColorA;
@@ -130,7 +124,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
             if (hoverX >= 0 && hoverX < _world.WidthCells && hoverY >= 0 && hoverY < _world.HeightCells) {
                 instanceCount = 1;
                 // If disk topology, request world-centered instance data from the disk grid so highlight matches rendering
-                if (_world.ActiveLayer?.Grid is DiskCellGrid disk && _world.GridTopology == GridTopologies.GridTopology.SPIRAL) {
+                if (_world.ActiveLayer?.Grid is DiskCellGrid disk && _world.GridTopology == GridTopology.SPIRAL) {
                     var inst = disk.GetCellWorldPosition(hoverX, hoverY, _cellSize);
                     instanceData[0] = inst.X;
                     instanceData[1] = inst.Y;
@@ -139,7 +133,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
                 } else {
                     // For hex topology, compute the top-left of the hex bounding box so the
                     // highlight quad aligns with renderer instance placement.
-                    if (_world.GridTopology == GridTopologies.GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
+                    if (_world.GridTopology == GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
                         float hexH = _cellSize * 0.86602540378f;
                         float xStep = _cellSize * 0.75f;
                         float cx = hoverX * xStep;
@@ -166,7 +160,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
                 int w = maxX - minX + 1;
                 int h = maxY - minY + 1;
                 instanceCount = 1;
-                if (_world.GridTopology == GridTopologies.GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
+                if (_world.GridTopology == GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
                     // For hex topology compute a rectangular bounding box in world space
                     // that covers the selected cells. Use the same hex geometry as
                     // instance placement: centers separated by xStep horizontally and
@@ -204,7 +198,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
         // Choose highlight shader per-frame. For hex topology + zone placement we
         // need the rectangular highlight vertex shader so region sizing is correct.
         ShaderProgram shaderToUse = _highlightShader!;
-        if (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopologies.GridTopology.HEX) {
+        if (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopology.HEX) {
             shaderToUse = _highlightShaderRect!;
         }
         // Use the chosen highlight program and VAO first, then upload instance data
@@ -235,8 +229,8 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
         if (uViewProjH >= 0) GL.UniformMatrix4(uViewProjH, false, ref viewProj);
         if (uCellSizeH >= 0) GL.Uniform1(uCellSizeH, _cellSize);
-        if (uUseTrapezoidH >= 0) GL.Uniform1(uUseTrapezoidH, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
-        if (uUseHexH >= 0) GL.Uniform1(uUseHexH, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
+        if (uUseTrapezoidH >= 0) GL.Uniform1(uUseTrapezoidH, _world.GridTopology == GridTopology.SPIRAL ? 1 : 0);
+        if (uUseHexH >= 0) GL.Uniform1(uUseHexH, _world.GridTopology == GridTopology.HEX ? 1 : 0);
         // pass disk center for highlight calculations
         if (uDiskCenterH >= 0) {
             if (_world.ActiveLayer?.Grid is DiskCellGrid diskGrid) {
@@ -250,7 +244,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
         if (uTimeH >= 0) GL.Uniform1(uTimeH, (float)DateTime.Now.TimeOfDay.TotalSeconds);
         if (uPixelsPerUnitH >= 0) GL.Uniform1(uPixelsPerUnitH, camera.Zoom);
         // If using hex topology and user is doing a zone placement, request rectangular highlight
-        int useRect = (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopologies.GridTopology.HEX) ? 1 : 0;
+        int useRect = (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopology.HEX) ? 1 : 0;
         if (uUseRectH >= 0) GL.Uniform1(uUseRectH, useRect);
         if (uBorderThicknessH >= 0) GL.Uniform1(uBorderThicknessH, 2.0f);
         if (uDotFreqH >= 0) GL.Uniform1(uDotFreqH, 4.0f);
@@ -385,11 +379,11 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 		// Select appropriate shader variant for this world's topology.
 		switch (_world.GridTopology) {
-			case GridTopologies.GridTopology.HEX:
+			case GridTopology.HEX:
 				SetActiveGridShader(_shaderHex);
 				SetActiveHighlightShader(_highlightShaderHex);
 				break;
-			case GridTopologies.GridTopology.SPIRAL:
+			case GridTopology.SPIRAL:
 				SetActiveGridShader(_shaderDisk);
 				SetActiveHighlightShader(_highlightShaderDisk);
 				break;
@@ -416,22 +410,15 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		_uUseTrapezoid = _shader.GetUniformLocation("uUseTrapezoid");
 		_uDiskCenter = _shader.GetUniformLocation("uDiskCenter");
 		_uUseHex = _shader.GetUniformLocation("uUseHex");
-		// optional uniform to control hex scaling in shader
-		_uHexScale = _shader.GetUniformLocation("uHexScale");
 
 	}
 
     private void SetActiveHighlightShader(ShaderProgram? shader) {
         _highlightShader = shader;
         if (shader == null) return;
-        _uHViewProj = shader.GetUniformLocation("uViewProj");
         _uHCellSize = shader.GetUniformLocation("uCellSize");
-        _uHUseTrapezoid = shader.GetUniformLocation("uUseTrapezoid");
-        _uHUseHex = shader.GetUniformLocation("uUseHex");
         _uHUseRect = shader.GetUniformLocation("uUseRect");
         _uHDiskCenter = shader.GetUniformLocation("uDiskCenter");
-        _uHTime = shader.GetUniformLocation("uTime");
-        _uHPixelsPerUnit = shader.GetUniformLocation("uPixelsPerUnit");
         _uHBorderThicknessPx = shader.GetUniformLocation("uBorderThicknessPx");
         _uHDotFreq = shader.GetUniformLocation("uDotFrequency");
         _uHColorA = shader.GetUniformLocation("uColorA");
@@ -476,7 +463,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 		_shader.Use();
 		_vao.Bind();
-		if (_world.GridTopology == GridTopologies.GridTopology.HEX) {
+		if (_world.GridTopology == GridTopology.HEX) {
 			if (!_didLogHexMode) { Logger.Info("Renderer: HEX topology active - using hex fragment path."); _didLogHexMode = true; }
 		} else {
 			if (_didLogHexMode) { Logger.Info("Renderer: EXITTED HEX topology."); _didLogHexMode = false; }
@@ -487,7 +474,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 
 		GL.Uniform1(_uCellSize, _cellSize);
 
-		GL.Uniform1(_uUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+		GL.Uniform1(_uUseTrapezoid, _world.GridTopology == GridTopology.SPIRAL ? 1 : 0);
 		// disk center in world coordinates (backing-grid centered)
 		if (_world.ActiveLayer?.Grid is DiskCellGrid disk) {
 			var dc = disk.GetBackingGridCenter(_cellSize);
@@ -505,7 +492,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
 		GL.Uniform1(_uShowGrid, ShowGrid ? 1 : 0);
 		GL.Uniform1(_uPixelsPerUnit, camera.Zoom);
 		GL.Uniform1(_uGridThicknessPx, GridThicknessPixels);
-		GL.Uniform1(_uUseHex, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
+		GL.Uniform1(_uUseHex, _world.GridTopology == GridTopology.HEX ? 1 : 0);
 
 		// Bind per-cell index texture to unit 0 and palette to unit 1
 		if (_cellIndexTex != 0) {
@@ -524,11 +511,11 @@ public sealed class Renderer(float cellSize) : IDisposable {
         // For hex topology we disable blending so discarded fragments do not blend
         // with underlying quads (prevents rectangular alpha artifacts).
         bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
-        if (_world.GridTopology == GridTopologies.GridTopology.HEX) {
+        if (_world.GridTopology == GridTopology.HEX) {
             GL.Disable(EnableCap.Blend);
         }
         GL.DrawArraysInstanced(PrimitiveType.TriangleFan, 0, 4, _instancePositions.Length);
-        if (_world.GridTopology == GridTopologies.GridTopology.HEX && wasBlendEnabled) {
+        if (_world.GridTopology == GridTopology.HEX && wasBlendEnabled) {
             GL.Enable(EnableCap.Blend);
         }
 
@@ -746,7 +733,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
         Vector2[] pts;
         if (_instancePositions != null && _instancePositions.Length > 0) {
             // If disk topology, compute extents relative to disk center
-            if (_world.GridTopology == GridTopologies.GridTopology.SPIRAL && _world.ActiveLayer?.Grid is DiskCellGrid disk) {
+            if (_world.GridTopology == GridTopology.SPIRAL && _world.ActiveLayer?.Grid is DiskCellGrid disk) {
                 Vector2 center = disk.GetBackingGridCenter(_cellSize);
                 float maxRelX = 0f;
                 float maxRelY = 0f;

@@ -1,4 +1,4 @@
-namespace Biome2.FileLoading;
+namespace Biome2.World.CellGrid;
 
 public enum EdgeMode {
     BORDER,

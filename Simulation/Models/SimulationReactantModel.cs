@@ -1,4 +1,3 @@
-using System;
 
 namespace Biome2.Simulation.Models;
 

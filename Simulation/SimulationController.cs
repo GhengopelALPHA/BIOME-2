@@ -1,11 +1,7 @@
 ﻿using Biome2.World;
 using Biome2.Diagnostics;
-using Biome2.FileLoading;
-using System;
-using System.Linq;
-using System.Threading;
-using System.Threading.Tasks;
 using Biome2.FileLoading.Models;
+using Biome2.World.CellGrid;
 
 namespace Biome2.Simulation;
 
@@ -72,16 +68,20 @@ public sealed class SimulationController : IDisposable {
         // If we have a last applied request, re-apply it but override sizing.
         if (_lastWorldModel != null)
         {
-            var req = new WorldModel(
-                width: Math.Max(1, width),
-                height: Math.Max(1, height),
-                depth: Math.Max(1, depth),
-                paused: _lastWorldModel.Paused,
-                species: _lastWorldModel.Species,
+            var config = new WorldConfigModel(
+                width: width,
+                height: height,
+                depth: depth,
+                gridTopology: _lastWorldModel.Config.GridTopology,
+                edgeMode: _lastWorldModel.Config.Edges,
+                paused: _lastWorldModel.Config.Paused
+            );
+
+			var req = new WorldModel(
+                config: config,
+				species: _lastWorldModel.Species,
                 layers: _lastWorldModel.Layers,
-                rules: _lastWorldModel.Rules,
-                edges: _lastWorldModel.Edges,
-                topology: _lastWorldModel.GridTopology
+                rules: _lastWorldModel.Rules
 			);
 
             ApplyRules(req);
@@ -89,11 +89,11 @@ public sealed class SimulationController : IDisposable {
         }
 
         // No last request: construct a blank world with requested size and preserve layer count.
-        int layerCount = Math.Max(1, _world.LayerCount);
+        int layerCount = Math.Max(1, _world.LayerCount); // TODO: stop making corrections; handle errors instead
         var newWorld = new WorldState(Math.Max(1, width), Math.Max(1, height), layerCount);
 
         // Preserve the previously selected active layer index if possible so the visualized
-        // layer does not change when restarting (layers don't change in this path).
+        // layer does not change when restarting (layers don't change in this path). TODO: move to restarts only, not new loads
         int prevActive = _world.ActiveLayerIndex;
         newWorld.ActiveLayerIndex = Math.Clamp(prevActive, 0, Math.Max(0, newWorld.LayerCount - 1));
 
@@ -195,17 +195,17 @@ public sealed class SimulationController : IDisposable {
         _lastWorldModel = worldModel;
 
         // Immediately apply pause setting so background loop respects it quickly.
-        Clock.Paused = worldModel.Paused;
+        Clock.Paused = worldModel.Config.Paused;
 
         // Determine sizing: prefer file-provided positive values, otherwise keep current world values.
-        int newWidth = worldModel.Width > 0 ? worldModel.Width : Math.Max(1, _world.WidthCells);
-        int newHeight = worldModel.Height > 0 ? worldModel.Height : Math.Max(1, _world.HeightCells);
-        int newDepth = worldModel.HexDepth > 0 ? worldModel.HexDepth : Math.Max(1, _world.DepthCells);
+        int newWidth = worldModel.Config.Width > 0 ? worldModel.Config.Width : Math.Max(1, _world.WidthCells);
+        int newHeight = worldModel.Config.Height > 0 ? worldModel.Config.Height : Math.Max(1, _world.HeightCells);
+        int newDepth = worldModel.Config.HexDepth > 0 ? worldModel.Config.HexDepth : Math.Max(1, _world.DepthCells);
         
 		int newLayerCount = (worldModel.Layers != null && worldModel.Layers.Count > 0) ? worldModel.Layers.Count : Math.Max(1, _world.LayerCount);
 
         // Construct new runtime world state using requested topology.
-        var topology = worldModel.GridTopology;
+        var topology = worldModel.Config.GridTopology;
 
 		var newWorld = new WorldState(newWidth, newHeight, newLayerCount, topology, newDepth);
 
@@ -233,7 +233,7 @@ public sealed class SimulationController : IDisposable {
 
         // Prepare rules and edge mode
         var fileRules = worldModel.Rules ?? [];
-        var newEdgeMode = worldModel.Edges;
+        var newEdgeMode = worldModel.Config.Edges;
 
         // Convert file models to simulation models using the new world for name resolution.
         var (simRules, simIndex, simLayersWithRules) = RuleSetBuilder.Build(fileRules, newWorld);

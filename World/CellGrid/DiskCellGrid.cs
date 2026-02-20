@@ -144,7 +144,7 @@ public sealed class DiskCellGrid : ICellGrid
             used = true;
             if (rr < 0 || rr >= _rings)
             {
-                if (edgeMode == EdgeMode.WRAP)
+                if (edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY)
                 {
                     if (rr < 0) rr = (rr % _rings + _rings) % _rings;
                     else rr = rr % _rings;
@@ -358,7 +358,7 @@ public sealed class DiskCellGrid : ICellGrid
 
             if (targetRing < 0 || targetRing >= _rings)
             {
-                if (edgeMode == EdgeMode.WRAP)
+                if (edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY)
                 {
                     if (targetRing < 0) targetRing = (targetRing % _rings + _rings) % _rings;
                     else targetRing = targetRing % _rings;

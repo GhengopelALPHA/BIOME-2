@@ -400,6 +400,7 @@ uniform float uDotFrequency;
 uniform vec3 uColorA;
 uniform vec3 uColorB;
 uniform float uAlpha;
+uniform int uUseRect;
 
 void main()
 {
@@ -407,10 +408,32 @@ void main()
     vec2 regionWorld = vInstanceSize * uCellSize;
     float bn = min(borderWorld / max(regionWorld.x, 1e-6), borderWorld / max(regionWorld.y, 1e-6));
     bn = clamp(bn, 0.001, 0.5);
-    float hexH = uCellSize * 0.86602540378;
+
+    // If caller requested a rectangular highlight (zone select), use simple rect logic.
+    if (uUseRect == 1) {
+        float dLeft = vRegionNorm.x;
+        float dRight = 1.0 - vRegionNorm.x;
+        float dDown = vRegionNorm.y;
+        float dUp = 1.0 - vRegionNorm.y;
+        float distToEdge = min(min(dLeft, dRight), min(dDown, dUp));
+        if (distToEdge > bn) discard;
+        float along;
+        float length;
+        if (dLeft <= bn || dRight <= bn) { along = vRegionUv.y; length = vInstanceSize.y; } else { along = vRegionUv.x; length = vInstanceSize.x; }
+        float pval = along * uDotFrequency;
+        float phase = fract(pval + uTime * 4.0);
+        float choice = step(0.5, phase);
+        vec3 col = mix(uColorA, uColorB, choice);
+        fragColor = vec4(col, uAlpha);
+        return;
+    }
+
+    // Hex highlight: match GridFragmentHex's scaling/math so the highlight matches hex shape.
+    float hexH = uCellSize * 0.865;
     float aspect = hexH / uCellSize;
     vec2 p = vRegionNorm - vec2(0.5);
-    p.y /= aspect;
+    // Apply the same vertical scaling used by the grid shader
+    p.y *= aspect;
     p = abs(p);
     float k = 0.57735026919;
     float edgeDist = 0.5 - (p.x + p.y * k);

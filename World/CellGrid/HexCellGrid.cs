@@ -34,33 +34,44 @@ public sealed class HexCellGrid : ICellGrid
     /// </summary>
     public (int X, int Y) MapWorldToCell(Vector2 worldPos, float cellSize)
     {
-        // Compute metrics
-        float hexH = cellSize * 0.86602540378f; // height = sqrt(3)/2 * width
-        float xStep = 0.75f * cellSize; // horizontal step between columns (3/4 width)
+        // Compute hex geometry for a flat-top layout
+        // width == cellSize; height = sqrt(3)/2 * width
+        float hexHeight = cellSize * 0.86602540378f; // ~= 0.8660254
+        // horizontal step between column centers for flat-top hexes is 3/4 * width
+        float columnStep = 0.75f * cellSize;
 
-        // Candidate column estimate
-        int estCol = (int)Math.Floor(worldPos.X / xStep);
+        // Quick column estimate based on world X. We'll search nearby columns to
+        // find the true nearest hex center (since hex centers are staggered).
+        int estimatedColumn = (int)Math.Floor(worldPos.X / columnStep);
 
-        // search nearby candidates to find nearest cell center
+        // Search nearby candidates to find the nearest cell center (squared distance)
         float bestDist2 = float.MaxValue;
         int bestCol = -1, bestRow = -1;
 
-        for (int cx = estCol - 1; cx <= estCol + 1; cx++) {
-            for (int ry = -1; ry <= 1; ry++) {
-                int estRow = (int)Math.Floor((worldPos.Y - ((cx & 1) != 0 ? hexH * 0.5f : 0f)) / hexH);
-                int row = estRow + ry;
+        // We only need to check the estimated column and its immediate neighbors
+        for (int candidateColumn = estimatedColumn - 1; candidateColumn <= estimatedColumn + 1; candidateColumn++) {
+            // For each column, estimate the row and probe the row and its immediate neighbors
+            int estimatedRowBase = (int)Math.Floor((worldPos.Y - ((candidateColumn & 1) != 0 ? hexHeight * 0.5f : 0f)) / hexHeight);
 
-                if (cx < 0 || cx >= _cols || row < 0 || row >= _rows) continue;
+            for (int rowOffset = -1; rowOffset <= 1; rowOffset++) {
+                int candidateRow = estimatedRowBase + rowOffset;
 
-                float px = cx * xStep;
-                float py = row * hexH + (((cx & 1) != 0) ? hexH * 0.5f : 0f);
+                // Skip candidates outside the backing rectangular storage
+                if (candidateColumn < 0 || candidateColumn >= _cols || candidateRow < 0 || candidateRow >= _rows) continue;
 
-                float dx = worldPos.X - px;
-                float dy = worldPos.Y - py;
-                float d2 = dx * dx + dy * dy;
-                if (d2 < bestDist2) {
-                    bestDist2 = d2;
-                    bestCol = cx; bestRow = row;
+                // Compute the candidate center position in world space
+                float candidateCenterX = candidateColumn * columnStep;
+                float candidateCenterY = candidateRow * hexHeight + (((candidateColumn & 1) != 0) ? hexHeight * 0.5f : 0f);
+
+                // Squared distance from worldPos to candidate center (avoid sqrt)
+                float deltaX = worldPos.X - candidateCenterX;
+                float deltaY = worldPos.Y - candidateCenterY;
+                float distanceSq = deltaX * deltaX + deltaY * deltaY;
+
+                if (distanceSq < bestDist2) {
+                    bestDist2 = distanceSq;
+                    bestCol = candidateColumn;
+                    bestRow = candidateRow;
                 }
             }
         }
@@ -84,14 +95,15 @@ public sealed class HexCellGrid : ICellGrid
         // the provided WIDTH (_cols), HEIGHT (_rows) and DEPTH (Depth).
         // Convert offset coords (odd-q vertical layout) to axial then to cube
         // coordinates centered on the backing grid, then test against radii.
-        if (Depth <= 0) return true;
 
         // radii along cube axes: map WIDTH -> rx (cube x), HEIGHT -> rz (cube z), DEPTH -> ry (cube y)
-        int rx = Math.Max(0, (_cols - 1) / 2);
-        int rz = Math.Max(0, (_rows - 1) / 2);
-        int ry = Math.Max(0, (Depth - 1) / 2);
+        int rx = Math.Max(0, (_cols - 1) / 2) + 1;
+        int rz = Math.Max(0, (_rows - 1) / 2) + 1;
+        int ry = Math.Max(0, (Depth - 1) / 2) + 1;
 
         // offset (odd-q) -> axial
+        // Convert from odd-q (vertical layout where odd columns are offset down)
+        // to axial coordinates (q = col, r = row adjusted for offset).
         int aq = x;
         int ar = y - ((x - (x & 1)) / 2);
 
@@ -104,10 +116,10 @@ public sealed class HexCellGrid : ICellGrid
         int cz = ar - centerAr;
         int cy = -cx - cz;
 
-        return Math.Abs(cx) <= rx && Math.Abs(cy) <= ry && Math.Abs(cz) <= rz;
+        return Math.Abs(cx) < rx && Math.Abs(cy) < ry && Math.Abs(cz) < rz;
     }
 
-    public bool IsValidCellMasked(int x, int y) => IsValidCell(x, y) && IsMaskedCell(x, y);
+    public bool IsValidCellMasked(int x, int y) => IsValidCell(x, y);
 
     public byte GetCurrent(int x, int y) => IsValidCell(x, y) ? _inner.GetCurrent(x, y) : (byte)0;
     public void SetCurrent(int x, int y, byte value) { if (IsValidCell(x, y)) _inner.SetCurrent(x, y, value); }
@@ -121,70 +133,95 @@ public sealed class HexCellGrid : ICellGrid
     {
         if (dest.Length < 8) throw new ArgumentException("dest must be at least length 8", nameof(dest));
 
-        byte backupBorder = 255;
-        byte backupInfinite = 0;
-        byte backup = backupBorder;
+        // Values to use when a neighbor is out-of-bounds depending on edge mode
+        const byte BackupBorder = 255;   // used for BORDER mode (default)
+        const byte BackupInfinite = 0;   // used for INFINITE mode
 
-        int ni = 0;
+        byte fillValue = BackupBorder;
+
+        int writeIndex = 0;
+
+        // If the target cell itself is invalid, return an array filled with the chosen backup
         if (!IsValidCell(x, y)) {
-            for (int i = 0; i < 8; i++) dest[ni++] = backup;
-            return ni;
+            for (int i = 0; i < 8; i++) dest[writeIndex++] = fillValue;
+            return writeIndex;
         }
 
-        bool odd = (x & 1) != 0;
+        bool isOddColumn = (x & 1) != 0;
 
-        (int nx, int ny)[] neigh = odd ? new (int,int)[] {
-            (x, y-1),
-            (x+1, y),
-            (x+1, y+1),
-            (x, y+1),
-            (x-1, y+1),
-            (x-1, y),
+        // INFINITE edges use zero as the out-of-bounds value
+        if (edgeMode == EdgeMode.INFINITE) fillValue = BackupInfinite;
+
+        // Neighbor ordering: N, NE, SE, S, SW, NW
+        (int cx, int cy)[] neighbors = isOddColumn ? new (int,int)[] {
+            (x, y-1),    // N
+            (x+1, y),    // NE
+            (x+1, y+1),  // SE
+            (x, y+1),    // S
+            (x-1, y+1),  // SW
+            (x-1, y),    // NW
         } : new (int,int)[] {
-            (x, y-1),
-            (x+1, y-1),
-            (x+1, y),
-            (x, y+1),
-            (x-1, y),
-            (x-1, y-1),
+            (x, y-1),    // N
+            (x+1, y-1),  // NE
+            (x+1, y),    // SE
+            (x, y+1),    // S
+            (x-1, y),    // SW
+            (x-1, y-1),  // NW
         };
 
-        foreach (var pair in neigh) {
-            int rx = pair.Item1;
-            int ry = pair.Item2;
-            bool outOfX = rx < 0 || rx >= _cols;
-            bool outOfY = ry < 0 || ry >= _rows;
-            bool useNeighbor = true;
+        // Helper: test a candidate coordinate both inside rectangular backing storage
+        // and inside the hex mask (so that masked-off corners are treated as empty).
+        bool IsCandidateValid(int candX, int candY) => candX >= 0 && candX < _cols && candY >= 0 && candY < _rows && IsMaskedCell(candX, candY);
 
-            switch (edgeMode) {
-                case EdgeMode.WRAP:
-                    if (rx < 0) rx += _cols; else if (rx >= _cols) rx -= _cols;
-                    if (ry < 0) ry += _rows; else if (ry >= _rows) ry -= _rows;
-                    break;
-                case EdgeMode.WRAPX:
-                    if (rx < 0) rx += _cols; else if (rx >= _cols) rx -= _cols;
-                    if (outOfY) useNeighbor = false;
-                    break;
-                case EdgeMode.WRAPY:
-                    if (ry < 0) ry += _rows; else if (ry >= _rows) ry -= _rows;
-                    if (outOfX) useNeighbor = false;
-                    break;
-                case EdgeMode.INFINITE:
-                    if (outOfX || outOfY) useNeighbor = false;
-                    backup = backupInfinite;
-                    break;
-                default:
-                    if (outOfX || outOfY) useNeighbor = false;
-                    break;
+        foreach (var neighbor in neighbors) {
+            int candidateX = neighbor.cx;
+            int candidateY = neighbor.cy;
+
+            // Default: assume neighbor not found and will use the fillValue
+            bool foundNeighbor = false;
+            int selectedX = -1, selectedY = -1;
+
+            // If the immediate neighbor is valid, use it directly
+            if (IsCandidateValid(candidateX, candidateY)) {
+                selectedX = candidateX; selectedY = candidateY; foundNeighbor = true;
+            } else {
+                // For wrapping topologies, allow searching nearby tiled copies so
+                // edges line up correctly with the hex mask. All WRAP variants
+                // (WRAP, WRAPX, WRAPY) behave the same for this implementation.
+                bool allowWrap = edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY;
+
+                if (allowWrap) {
+                    // Search offsets (-1,0,1) in both backing axes. Prioritize
+                    // tiles by increasing Manhattan distance so we choose the
+                    // nearest wrapped copy.
+                    int[] offsetRange = new int[] { -1, 0, 1 };
+
+                    for (int manhattanDistance = 0; manhattanDistance <= 2 && !foundNeighbor; manhattanDistance++) {
+                        foreach (int offsetX in offsetRange) {
+                            foreach (int offsetY in offsetRange) {
+                                if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
+                                int wrappedX = candidateX + offsetX * _cols;
+                                int wrappedY = candidateY + offsetY * _rows;
+                                if (IsCandidateValid(wrappedX, wrappedY)) {
+                                    selectedX = wrappedX; selectedY = wrappedY; foundNeighbor = true; break;
+                                }
+                            }
+                            if (foundNeighbor) break;
+                        }
+                    }
+                }
+                // If wrapping wasn't allowed or nothing matched, foundNeighbor remains false
             }
 
-            dest[ni++] = useNeighbor ? _inner.GetCurrent(rx, ry) : backup;
+            // Write either the neighbor value or the chosen fill value
+            dest[writeIndex++] = foundNeighbor ? _inner.GetCurrent(selectedX, selectedY) : fillValue;
         }
 
-        dest[ni++] = backup;
-        dest[ni++] = backup;
+        // Two padding entries (kept for compatibility with callers expecting 8 entries)
+        //dest[writeIndex++] = fillValue;
+        //dest[writeIndex++] = fillValue;
 
-        return ni;
+        return writeIndex;
     }
 
     public int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY)
@@ -214,24 +251,45 @@ public sealed class HexCellGrid : ICellGrid
             (x-1, y-1),
         };
 
+        // Reuse much of the logic from GetNeighbors but record coordinates instead
+        bool IsCandidateValid(int cx, int cy) => cx >= 0 && cx < _cols && cy >= 0 && cy < _rows && IsMaskedCell(cx, cy);
+
         foreach (var pair in neigh) {
-            int rx = pair.Item1;
-            int ry = pair.Item2;
-            bool used = true;
-            if (rx < 0 || rx >= _cols || ry < 0 || ry >= _rows) {
-                if (edgeMode == EdgeMode.WRAP) {
-                    if (rx < 0) rx = (rx % _cols + _cols) % _cols; else rx = rx % _cols;
-                    if (ry < 0) ry = (ry % _rows + _rows) % _rows; else ry = ry % _rows;
-                } else {
-                    used = false;
+            int neighborX = pair.Item1;
+            int neighborY = pair.Item2;
+
+            bool used = false;
+            int selectedX = -1, selectedY = -1;
+
+            if (IsCandidateValid(neighborX, neighborY)) {
+                selectedX = neighborX; selectedY = neighborY; used = true;
+            } else {
+                bool allowWrap = edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY;
+
+                if (allowWrap) {
+                    int[] offsetRangeX = new int[] { -1, 0, 1 };
+                    int[] offsetRangeY = new int[] { -1, 0, 1 };
+
+                    for (int manhattanDistance = 0; manhattanDistance <= 2 && !used; manhattanDistance++) {
+                        foreach (int offsetX in offsetRangeX) {
+                            foreach (int offsetY in offsetRangeY) {
+                                if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
+                                int cx = neighborX + offsetX * _cols;
+                                int cy = neighborY + offsetY * _rows;
+                                if (IsCandidateValid(cx, cy)) { selectedX = cx; selectedY = cy; used = true; break; }
+                            }
+                            if (used) break;
+                        }
+                    }
                 }
             }
 
             if (!used) { destX[ni] = -1; destY[ni] = -1; }
-            else { destX[ni] = rx; destY[ni] = ry; }
+            else { destX[ni] = selectedX; destY[ni] = selectedY; }
             ni++;
         }
 
+        // Two padding entries at the end for callers expecting 8 entries
         destX[ni] = -1; destY[ni] = -1; ni++;
         destX[ni] = -1; destY[ni] = -1; ni++;
 

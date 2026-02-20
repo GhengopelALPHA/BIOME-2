@@ -150,6 +150,7 @@ public sealed class ImGuiController : IDisposable
                         ImGui.SetNextWindowBgAlpha(0.0f);
                         ImGui.Begin("##hover_overlay", flags);
                         ImGui.SetWindowFontScale(1.5f);
+                        ImGui.Text($"({hx}, {hy})");
                         ImGui.Text(name);
                         ImGui.End();
                         ImGui.PopStyleVar();

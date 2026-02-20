@@ -68,6 +68,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
     private int _uHUseTrapezoid;
     private int _uHUseHex;
     private int _uHDiskCenter;
+    private int _uHUseRect;
     private int _uHTime;
     private int _uHPixelsPerUnit;
     private int _uHBorderThicknessPx;
@@ -165,45 +166,97 @@ public sealed class Renderer(float cellSize) : IDisposable {
                 int w = maxX - minX + 1;
                 int h = maxY - minY + 1;
                 instanceCount = 1;
-                instanceData[0] = minX * _cellSize;
-                instanceData[1] = minY * _cellSize;
-                instanceData[2] = (float)w;
-                instanceData[3] = (float)h;
+                if (_world.GridTopology == GridTopologies.GridTopology.HEX && _world.ActiveLayer?.Grid is HexCellGrid) {
+                    // For hex topology compute a rectangular bounding box in world space
+                    // that covers the selected cells. Use the same hex geometry as
+                    // instance placement: centers separated by xStep horizontally and
+                    // hexH vertically. The rectangular highlight vertex shader expects
+                    // aInstance.zw to be sizes in "cell units" multiplied by uCellSize,
+                    // so convert world extents into those scaled units.
+                    float hexH = _cellSize * 0.86602540378f;
+                    float xStep = _cellSize * 0.75f;
+                    // top-left center of the first cell
+                    float cx0 = minX * xStep;
+                    float cy0 = minY * hexH + (((minX & 1) != 0) ? hexH * 0.5f : 0f);
+                    float originX = cx0 - (_cellSize * 0.5f);
+                    float originY = cy0 - (hexH * 0.5f);
+                    // world extents: width = (w-1)*xStep + cellSize, height = h*hexH
+                    float worldW = (w - 1) * xStep + _cellSize;
+                    float worldH = h * hexH;
+                    // convert to the rectangular vertex shader's size units (size * uCellSize = worldExtent)
+                    float sizeX = worldW / _cellSize;
+                    float sizeY = worldH / _cellSize;
+                    instanceData[0] = originX;
+                    instanceData[1] = originY;
+                    instanceData[2] = sizeX;
+                    instanceData[3] = sizeY;
+                } else {
+                    instanceData[0] = minX * _cellSize;
+                    instanceData[1] = minY * _cellSize;
+                    instanceData[2] = (float)w;
+                    instanceData[3] = (float)h;
+                }
             }
         }
 
         if (instanceCount == 0) return;
 
-        // Use the highlight program and VAO first, then upload instance data so the VAO
-        // records the correct buffer binding on all drivers.
-        _highlightShader!.Use();
+        // Choose highlight shader per-frame. For hex topology + zone placement we
+        // need the rectangular highlight vertex shader so region sizing is correct.
+        ShaderProgram shaderToUse = _highlightShader!;
+        if (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopologies.GridTopology.HEX) {
+            shaderToUse = _highlightShaderRect!;
+        }
+        // Use the chosen highlight program and VAO first, then upload instance data
+        // so the VAO records the correct buffer binding on all drivers.
+        shaderToUse.Use();
         _highlightVao!.Bind();
         // Upload instance data (vec4 per instance: origin.x, origin.y, size.x, size.y)
         _highlightInstanceVbo.Bind();
         _highlightInstanceVbo.SetData<float>(instanceData, BufferUsageHint.DynamicDraw);
 
         var viewProj = camera.GetViewProjection();
-        if (_uHViewProj >= 0) GL.UniformMatrix4(_uHViewProj, false, ref viewProj);
-        if (_uHCellSize >= 0) GL.Uniform1(_uHCellSize, _cellSize);
-        if (_uHUseTrapezoid >= 0) GL.Uniform1(_uHUseTrapezoid, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
-        if (_uHUseHex >= 0) GL.Uniform1(_uHUseHex, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
+        // Query uniform locations from the chosen shader and upload values. This
+        // avoids depending on cached locations which may belong to a different
+        // highlight shader variant.
+        int uViewProjH = shaderToUse.GetUniformLocation("uViewProj");
+        int uCellSizeH = shaderToUse.GetUniformLocation("uCellSize");
+        int uUseTrapezoidH = shaderToUse.GetUniformLocation("uUseTrapezoid");
+        int uUseHexH = shaderToUse.GetUniformLocation("uUseHex");
+        int uDiskCenterH = shaderToUse.GetUniformLocation("uDiskCenter");
+        int uTimeH = shaderToUse.GetUniformLocation("uTime");
+        int uPixelsPerUnitH = shaderToUse.GetUniformLocation("uPixelsPerUnit");
+        int uUseRectH = shaderToUse.GetUniformLocation("uUseRect");
+        int uBorderThicknessH = shaderToUse.GetUniformLocation("uBorderThicknessPx");
+        int uDotFreqH = shaderToUse.GetUniformLocation("uDotFrequency");
+        int uColorAH = shaderToUse.GetUniformLocation("uColorA");
+        int uColorBH = shaderToUse.GetUniformLocation("uColorB");
+        int uAlphaH = shaderToUse.GetUniformLocation("uAlpha");
+
+        if (uViewProjH >= 0) GL.UniformMatrix4(uViewProjH, false, ref viewProj);
+        if (uCellSizeH >= 0) GL.Uniform1(uCellSizeH, _cellSize);
+        if (uUseTrapezoidH >= 0) GL.Uniform1(uUseTrapezoidH, _world.GridTopology == GridTopologies.GridTopology.SPIRAL ? 1 : 0);
+        if (uUseHexH >= 0) GL.Uniform1(uUseHexH, _world.GridTopology == GridTopologies.GridTopology.HEX ? 1 : 0);
         // pass disk center for highlight calculations
-        if (_uHDiskCenter >= 0) {
+        if (uDiskCenterH >= 0) {
             if (_world.ActiveLayer?.Grid is DiskCellGrid diskGrid) {
                 var dc = diskGrid.GetBackingGridCenter(_cellSize);
-                GL.Uniform2(_uHDiskCenter, ref dc);
+                GL.Uniform2(uDiskCenterH, ref dc);
             } else {
                 Vector2 diskCenter = new Vector2(((_world.WidthCells - 1) * _cellSize) * 0.5f, ((_world.HeightCells - 1) * _cellSize) * 0.5f);
-                GL.Uniform2(_uHDiskCenter, ref diskCenter);
+                GL.Uniform2(uDiskCenterH, ref diskCenter);
             }
         }
-        if (_uHTime >= 0) GL.Uniform1(_uHTime, (float)DateTime.Now.TimeOfDay.TotalSeconds);
-        if (_uHPixelsPerUnit >= 0) GL.Uniform1(_uHPixelsPerUnit, camera.Zoom);
-        if (_uHBorderThicknessPx >= 0) GL.Uniform1(_uHBorderThicknessPx, 2.0f);
-        if (_uHDotFreq >= 0) GL.Uniform1(_uHDotFreq, 4.0f);
-        if (_uHColorA >= 0) GL.Uniform3(_uHColorA, new OpenTK.Mathematics.Vector3(0f,0f,0f));
-        if (_uHColorB >= 0) GL.Uniform3(_uHColorB, new OpenTK.Mathematics.Vector3(1f,1f,1f));
-        if (_uHAlpha >= 0) GL.Uniform1(_uHAlpha, 1.0f);
+        if (uTimeH >= 0) GL.Uniform1(uTimeH, (float)DateTime.Now.TimeOfDay.TotalSeconds);
+        if (uPixelsPerUnitH >= 0) GL.Uniform1(uPixelsPerUnitH, camera.Zoom);
+        // If using hex topology and user is doing a zone placement, request rectangular highlight
+        int useRect = (input.GetPlacementMode() == PlacementMode.Zone && _world.GridTopology == GridTopologies.GridTopology.HEX) ? 1 : 0;
+        if (uUseRectH >= 0) GL.Uniform1(uUseRectH, useRect);
+        if (uBorderThicknessH >= 0) GL.Uniform1(uBorderThicknessH, 2.0f);
+        if (uDotFreqH >= 0) GL.Uniform1(uDotFreqH, 4.0f);
+        if (uColorAH >= 0) GL.Uniform3(uColorAH, new OpenTK.Mathematics.Vector3(0f,0f,0f));
+        if (uColorBH >= 0) GL.Uniform3(uColorBH, new OpenTK.Mathematics.Vector3(1f,1f,1f));
+        if (uAlphaH >= 0) GL.Uniform1(uAlphaH, 1.0f);
 
         // Ensure blending is enabled for highlight overlays (some topology draws disable blending)
         bool wasBlendEnabled = GL.IsEnabled(EnableCap.Blend);
@@ -375,6 +428,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
         _uHCellSize = shader.GetUniformLocation("uCellSize");
         _uHUseTrapezoid = shader.GetUniformLocation("uUseTrapezoid");
         _uHUseHex = shader.GetUniformLocation("uUseHex");
+        _uHUseRect = shader.GetUniformLocation("uUseRect");
         _uHDiskCenter = shader.GetUniformLocation("uDiskCenter");
         _uHTime = shader.GetUniformLocation("uTime");
         _uHPixelsPerUnit = shader.GetUniformLocation("uPixelsPerUnit");
@@ -386,6 +440,7 @@ public sealed class Renderer(float cellSize) : IDisposable {
         // Bind the program and initialize sensible defaults so the highlight is visible
         shader.Use();
         if (_uHCellSize >= 0) GL.Uniform1(_uHCellSize, _cellSize);
+        if (_uHUseRect >= 0) GL.Uniform1(_uHUseRect, 0);
         if (_uHAlpha >= 0) GL.Uniform1(_uHAlpha, 1.0f);
         if (_uHBorderThicknessPx >= 0) GL.Uniform1(_uHBorderThicknessPx, 2.0f);
         if (_uHDotFreq >= 0) GL.Uniform1(_uHDotFreq, 4.0f);

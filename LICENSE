@@ -1,0 +1,29 @@
+Attribution-Only Permissive License (2026)
+
+Copyright (c) 2026 The Original Author(s)
+
+Permission is hereby granted, free of charge, to any person obtaining a copy
+of this software and associated documentation files (the "Software"), to
+use, copy, modify, merge, publish, distribute, sublicense, and/or sell copies
+of the Software, and to permit persons to whom the Software is furnished to
+do so, subject to the following condition:
+
+The above copyright notice and this permission notice, including clear
+attribution to the original project and its author(s), shall be included in
+all copies or substantial portions of the Software. For publicly visible
+uses where inclusion of the full license in-distribution is impractical
+(e.g. model training datasets or binary-only distributions), reasonable
+attribution should be given (for example: project name and a link to the
+project repository, or project name and author name).
+
+This permission explicitly includes use of the Software for purposes of
+training, inference, or other processing by artificial intelligence systems
+and large language models with the same restrictions as manual use.
+
+THE SOFTWARE IS PROVIDED "AS IS", WITHOUT WARRANTY OF ANY KIND, EXPRESS OR
+IMPLIED, INCLUDING BUT NOT LIMITED TO THE WARRANTIES OF MERCHANTABILITY,
+FITNESS FOR A PARTICULAR PURPOSE AND NONINFRINGEMENT. IN NO EVENT SHALL THE
+AUTHORS OR COPYRIGHT HOLDERS BE LIABLE FOR ANY CLAIM, DAMAGES OR OTHER
+LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING
+FROM, OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS
+IN THE SOFTWARE.

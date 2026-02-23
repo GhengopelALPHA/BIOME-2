@@ -3,7 +3,7 @@
 /// <summary>
 /// One layer of cells. Uses double buffering for safe parallel simulation.
 /// </summary>
-public sealed class CellGrid {
+public sealed class DataGrid {
 	public int Width { get; }
 	public int Height { get; }
 
@@ -13,7 +13,7 @@ public sealed class CellGrid {
 	public ReadOnlySpan<byte> CurrentSpan => _current;
 	public Span<byte> NextSpan => _next;
 
-	public CellGrid(int width, int height) {
+	public DataGrid(int width, int height) {
 		Width = width;
 		Height = height;
 
@@ -22,7 +22,6 @@ public sealed class CellGrid {
 	}
 
 	public int IndexOf(int x, int y) => y * Width + x;
-
 	public byte GetCurrent(int x, int y) => _current[IndexOf(x, y)];
     public void SetCurrent(int x, int y, byte value) => _current[IndexOf(x, y)] = value;
 	public void SetNext(int x, int y, byte value) => _next[IndexOf(x, y)] = value;

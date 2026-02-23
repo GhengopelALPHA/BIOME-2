@@ -45,6 +45,8 @@ public sealed class InputState {
 	private bool _rightMouseWasDown;
     private bool _rightDragStarted;
     private Vector2 _rightDragStart;
+    // Flag set when an interaction that should trigger a visual update occurred
+    public bool HadInteraction { get; private set; }
 
     // Placement state for left-button painting
     private bool _placing;
@@ -55,7 +57,7 @@ public sealed class InputState {
     private int[] _selectedSpecies = [];
 
     // Set snapshot of selected species indices (called from UI)
-    public void SetSelectedSpeciesIndices(int[] indices) {
+    public void SetSelectedSpeciesIndices(int[]? indices) {
         _selectedSpecies = indices ?? [];
     }
 
@@ -89,6 +91,10 @@ public sealed class InputState {
 
 	// Central entry for handling interactions that involve camera panning and painting.
 	public void HandleInteractions(Camera camera, Renderer renderer, Simulation.SimulationController simulation) {
+        // Reset per-frame interaction flag. It will be set if an action occurred
+        // that should cause a visual update while drawing is disabled.
+        HadInteraction = false;
+
         // If UI wants the mouse, do nothing.
         if (GuiWantsMouse) {
             // reset drag/placing states to avoid stale state
@@ -112,10 +118,12 @@ public sealed class InputState {
                         _rightDragStarted = true;
                         var drag = new Vector2(MouseDeltaX, -MouseDeltaY);
                         camera.PanBy(drag);
+                        HadInteraction = true;
                     }
                 } else {
                     var drag = new Vector2(MouseDeltaX, -MouseDeltaY);
                     camera.PanBy(drag);
+                    HadInteraction = true;
                 }
             }
         } else {
@@ -170,6 +178,9 @@ public sealed class InputState {
 
                 // Request immediate visual update (renderer uses world's current buffer)
                 renderer.UploadSingleCell(simulation.World.ActiveLayer.Grid, cellX, cellY);
+
+                // Indicate we performed an interaction that should force a render while drawing disabled
+                HadInteraction = true;
 
 				_lastPlacedX = cellX;
                 _lastPlacedY = cellY;
@@ -228,6 +239,9 @@ public sealed class InputState {
 
         // Snapshot selection once
         simulation.SetSelectedSpeciesIndices(sel);
+
+        // Mark that we will update visuals as a result of this interaction
+        HadInteraction = true;
 
         for (int y = minY; y <= maxY; y++) {
             for (int x = minX; x <= maxX; x++) {

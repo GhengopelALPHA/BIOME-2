@@ -72,7 +72,7 @@ public static class RulesValidator
 					ok = false;
 				}
 				if (react.Exclusion || react.LayerName != string.Empty) {
-					if (react.Count != 0 || react.Sign != 0) {
+					if (react.Count > 0 || react.Sign != 0) {
 						Logger.Warn($"{r.VerboseRule}: reactant '{react.SpeciesName}' is either a layer-target or exclusionary reactant. It cannot have either a signed or exact count value.");
 						ok = false;
 					}

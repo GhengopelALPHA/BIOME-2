@@ -170,11 +170,12 @@ internal sealed class ToolboxWindow
 			renderer.ShowAxes = showAxes;
 		}
 
-		// Disable Drawing toggle: when enabled, suspends renderer drawing (UI still updates)
-		bool drawingEnabled = renderer.DrawingEnabled;
-		if (ImGui.Checkbox("Enable Drawing", ref drawingEnabled)) {
-			renderer.DrawingEnabled = drawingEnabled;
-		}
+        // Disable Drawing toggle: when checked, suspend renderer drawing (UI still updates)
+        // Invert the stored renderer flag so the UI label reads "Disable Drawing".
+        bool disableDrawing = !renderer.DrawingEnabled;
+        if (ImGui.Checkbox("Disable Drawing", ref disableDrawing)) {
+            renderer.DrawingEnabled = !disableDrawing;
+        }
 
 		ImGui.Separator();
 
@@ -272,6 +273,8 @@ internal sealed class ToolboxWindow
 
 			if (selected.Count > 0) {
 				input.SetSelectedSpeciesIndices([.. selected]);
+			} else {
+                input.SetSelectedSpeciesIndices(null);
 			}
         }
 

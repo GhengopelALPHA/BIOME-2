@@ -12,17 +12,33 @@ namespace Biome2.World.CellGrid;
 /// </summary>
 public sealed class HexCellGrid : ICellGrid
 {
-    private readonly CellGrid _inner;
+    // Fields
+    private readonly DataGrid _dataGrid;
+
     private readonly int _cols;
     private readonly int _rows;
-    public int Depth { get; }
+    private readonly int _depth;
+    private readonly int _centerAq;
+    private readonly int _centerAr;
 
+    // Public properties
+    public int Width => _cols;
+    public int Height => _rows;
+    public ReadOnlySpan<byte> CurrentSpan => _dataGrid.CurrentSpan;
+    public Span<byte> NextSpan => _dataGrid.NextSpan;
+
+    // Constructor
     public HexCellGrid(int cols, int rows, int depth = 1)
     {
         _cols = Math.Max(1, cols);
         _rows = Math.Max(1, rows);
-        Depth = Math.Max(1, depth);
-        _inner = new CellGrid(_cols, _rows);
+        _depth = Math.Max(1, depth);
+        _dataGrid = new DataGrid(_cols, _rows);
+
+        // Precompute center axial coordinates for the backing grid so we
+        // don't recalculate them repeatedly in hot paths.
+        _centerAq = (_cols - 1) / 2;
+        _centerAr = (_rows - 1) / 2 - ((_centerAq - (_centerAq & 1)) / 2);
     }
 
     /// <summary>
@@ -77,54 +93,18 @@ public sealed class HexCellGrid : ICellGrid
         return (bestCol, bestRow);
     }
 
-    public int Width => _cols;
-    public int Height => _rows;
-
-    public ReadOnlySpan<byte> CurrentSpan => _inner.CurrentSpan;
-    public Span<byte> NextSpan => _inner.NextSpan;
-
-    public int IndexOf(int x, int y) => _inner.IndexOf(x, y);
+    public int IndexOf(int x, int y) => _dataGrid.IndexOf(x, y);
 
     public bool IsValidCell(int x, int y) => x >= 0 && x < _cols && y >= 0 && y < _rows && IsMaskedCell(x, y);
 
-    private bool IsMaskedCell(int x, int y)
-    {
-        // Derive a hex-shaped mask based on three axis extents derived from
-        // the provided WIDTH (_cols), HEIGHT (_rows) and DEPTH (Depth).
-        // Convert offset coords (odd-q vertical layout) to axial then to cube
-        // coordinates centered on the backing grid, then test against radii.
-
-        // radii along cube axes: map WIDTH -> rx (cube x), HEIGHT -> rz (cube z), DEPTH -> ry (cube y)
-        int rx = Math.Max(0, (_cols - 1) / 2) + 1;
-        int rz = Math.Max(0, (_rows - 1) / 2) + 1;
-        int ry = Math.Max(0, (Depth - 1) / 2) + 1;
-
-        // offset (odd-q) -> axial
-        // Convert from odd-q (vertical layout where odd columns are offset down)
-        // to axial coordinates (q = col, r = row adjusted for offset).
-        int aq = x;
-        int ar = y - ((x - (x & 1)) / 2);
-
-        // compute center axial coordinates for backing grid
-        int centerAq = (_cols - 1) / 2;
-        int centerAr = (_rows - 1) / 2 - ((centerAq - (centerAq & 1)) / 2);
-
-        // cube coords relative to center
-        int cx = aq - centerAq;
-        int cz = ar - centerAr;
-        int cy = -cx - cz;
-
-        return Math.Abs(cx) < rx && Math.Abs(cy) < ry && Math.Abs(cz) < rz;
-    }
-
     public bool IsValidCellMasked(int x, int y) => IsValidCell(x, y);
 
-    public byte GetCurrent(int x, int y) => IsValidCell(x, y) ? _inner.GetCurrent(x, y) : (byte)0;
-    public void SetCurrent(int x, int y, byte value) { if (IsValidCell(x, y)) _inner.SetCurrent(x, y, value); }
-    public void SetNext(int x, int y, byte value) { if (IsValidCell(x, y)) _inner.SetNext(x, y, value); }
-    public void SwapBuffers() => _inner.SwapBuffers();
-    public void CopyCurrentToNext() => _inner.CopyCurrentToNext();
-    public void Clear(byte value = 0) => _inner.Clear(value);
+    public byte GetCurrent(int x, int y) => IsValidCell(x, y) ? _dataGrid.GetCurrent(x, y) : (byte)0;
+    public void SetCurrent(int x, int y, byte value) { if (IsValidCell(x, y)) _dataGrid.SetCurrent(x, y, value); }
+    public void SetNext(int x, int y, byte value) { if (IsValidCell(x, y)) _dataGrid.SetNext(x, y, value); }
+    public void SwapBuffers() => _dataGrid.SwapBuffers();
+    public void CopyCurrentToNext() => _dataGrid.CopyCurrentToNext();
+    public void Clear(byte value = 0) => _dataGrid.Clear(value);
 
     // neighbor ordering: N, NE, SE, S, SW, NW (then two padding entries)
     public int GetNeighbors(int x, int y, EdgeMode edgeMode, Span<byte> dest)
@@ -158,14 +138,14 @@ public sealed class HexCellGrid : ICellGrid
             (x, y+1),    // S
             (x-1, y+1),  // SW
             (x-1, y),    // NW
-        } : new (int,int)[] {
+        } : [
             (x, y-1),    // N
             (x+1, y-1),  // NE
             (x+1, y),    // SE
             (x, y+1),    // S
             (x-1, y),    // SW
             (x-1, y-1),  // NW
-        };
+        ];
 
         // Helper: test a candidate coordinate both inside rectangular backing storage
         // and inside the hex mask (so that masked-off corners are treated as empty).
@@ -183,36 +163,70 @@ public sealed class HexCellGrid : ICellGrid
             if (IsCandidateValid(candidateX, candidateY)) {
                 selectedX = candidateX; selectedY = candidateY; foundNeighbor = true;
             } else {
-                // For wrapping topologies, allow searching nearby tiled copies so
-                // edges line up correctly with the hex mask. All WRAP variants
-                // (WRAP, WRAPX, WRAPY) behave the same for this implementation.
+                // For wrapping topologies, first attempt to map the candidate to
+                // its opposite counterpart across the hex-shaped mask by
+                // reflecting cube coordinates through the center. This yields a
+                // natural opposite neighbor for hex-world wrapping. If that
+                // doesn't produce a valid masked cell, fall back to searching
+                // nearby tiled copies (as before).
                 bool allowWrap = edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY;
 
                 if (allowWrap) {
-                    // Search offsets (-1,0,1) in both backing axes. Prioritize
-                    // tiles by increasing Manhattan distance so we choose the
-                    // nearest wrapped copy.
-                    int[] offsetRange = new int[] { -1, 0, 1 };
+                    // --- Attempt opposite reflection through hex center ---
+                    // Convert offset (odd-q) -> axial
+                    int candAq = candidateX;
+                    int candAr = candidateY - ((candidateX - (candidateX & 1)) / 2);
 
-                    for (int manhattanDistance = 0; manhattanDistance <= 2 && !foundNeighbor; manhattanDistance++) {
-                        foreach (int offsetX in offsetRange) {
-                            foreach (int offsetY in offsetRange) {
-                                if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
-                                int wrappedX = candidateX + offsetX * _cols;
-                                int wrappedY = candidateY + offsetY * _rows;
-                                if (IsCandidateValid(wrappedX, wrappedY)) {
-                                    selectedX = wrappedX; selectedY = wrappedY; foundNeighbor = true; break;
+                    // use precomputed center axial coordinates
+
+                    // cube coords relative to center
+                    int ccx = candAq - _centerAq;
+                    int ccz = candAr - _centerAr;
+                    int ccy = -ccx - ccz;
+
+                    // reflect through center to get opposite cube coords
+                    int ocx = -ccx;
+                    int ocz = -ccz;
+                    int ocy = -ccy;
+
+                    // convert back to axial and then to offset coords
+                    int oppAq = ocx + _centerAq;
+                    int oppAr = ocz + _centerAr;
+                    int oppX = oppAq;
+                    int oppY = oppAr + ((oppAq - (oppAq & 1)) / 2);
+
+                    // wrap into backing rectangle and test
+                    int wrappedOppX = ((oppX % _cols) + _cols) % _cols - 1;
+                    int wrappedOppY = ((oppY % _rows) + _rows) % _rows - 1;
+
+                    if (IsCandidateValid(wrappedOppX, wrappedOppY)) {
+                        selectedX = wrappedOppX; selectedY = wrappedOppY; foundNeighbor = true;
+                    }
+
+                    // --- Fallback: search nearby tiled copies (legacy behavior) ---
+                    if (!foundNeighbor) {
+                        int[] offsetRange = new int[] { -1, 0, 1 };
+
+                        /*for (int manhattanDistance = 0; manhattanDistance <= 2 && !foundNeighbor; manhattanDistance++) {
+                            foreach (int offsetX in offsetRange) {
+                                foreach (int offsetY in offsetRange) {
+                                    if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
+                                    int wrappedX = candidateX + offsetX * _cols;
+                                    int wrappedY = candidateY + offsetY * _rows;
+                                    if (IsCandidateValid(wrappedX, wrappedY)) {
+                                        selectedX = wrappedX; selectedY = wrappedY; foundNeighbor = true; break;
+                                    }
                                 }
+                                if (foundNeighbor) break;
                             }
-                            if (foundNeighbor) break;
-                        }
+                        }*/
                     }
                 }
                 // If wrapping wasn't allowed or nothing matched, foundNeighbor remains false
             }
 
             // Write either the neighbor value or the chosen fill value
-            dest[writeIndex++] = foundNeighbor ? _inner.GetCurrent(selectedX, selectedY) : fillValue;
+            dest[writeIndex++] = foundNeighbor ? _dataGrid.GetCurrent(selectedX, selectedY) : fillValue;
         }
 
         // Two padding entries (kept for compatibility with callers expecting 8 entries)
@@ -265,18 +279,49 @@ public sealed class HexCellGrid : ICellGrid
                 bool allowWrap = edgeMode == EdgeMode.WRAP || edgeMode == EdgeMode.WRAPX || edgeMode == EdgeMode.WRAPY;
 
                 if (allowWrap) {
-                    int[] offsetRangeX = new int[] { -1, 0, 1 };
-                    int[] offsetRangeY = new int[] { -1, 0, 1 };
+                    // First attempt reflection through hex center to find the
+                    // opposite counterpart for masked hex-world wrapping.
+                    int nAq = neighborX;
+                    int nAr = neighborY - ((neighborX - (neighborX & 1)) / 2);
 
-                    for (int manhattanDistance = 0; manhattanDistance <= 2 && !used; manhattanDistance++) {
-                        foreach (int offsetX in offsetRangeX) {
-                            foreach (int offsetY in offsetRangeY) {
-                                if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
-                                int cx = neighborX + offsetX * _cols;
-                                int cy = neighborY + offsetY * _rows;
-                                if (IsCandidateValid(cx, cy)) { selectedX = cx; selectedY = cy; used = true; break; }
+                    int centerAq = _centerAq;
+                    int centerAr = _centerAr;
+
+                    int ncx = nAq - centerAq;
+                    int ncz = nAr - centerAr;
+                    int ncy = -ncx - ncz;
+
+                    int ocx = -ncx;
+                    int ocz = -ncz;
+                    int ocy = -ncy;
+
+                    int oppAq = ocx + centerAq;
+                    int oppAr = ocz + centerAr;
+                    int oppX = oppAq;
+                    int oppY = oppAr + ((oppAq - (oppAq & 1)) / 2);
+
+                    int wrappedOppX = ((oppX % _cols) + _cols) % _cols;
+                    int wrappedOppY = ((oppY % _rows) + _rows) % _rows;
+
+                    if (IsCandidateValid(wrappedOppX, wrappedOppY)) {
+                        selectedX = wrappedOppX; selectedY = wrappedOppY; used = true;
+                    }
+
+                    // Fallback: legacy tiled search
+                    if (!used) {
+                        int[] offsetRangeX = new int[] { -1, 0, 1 };
+                        int[] offsetRangeY = new int[] { -1, 0, 1 };
+
+                        for (int manhattanDistance = 0; manhattanDistance <= 2 && !used; manhattanDistance++) {
+                            foreach (int offsetX in offsetRangeX) {
+                                foreach (int offsetY in offsetRangeY) {
+                                    if (Math.Abs(offsetX) + Math.Abs(offsetY) != manhattanDistance) continue;
+                                    int cx = neighborX + offsetX * _cols;
+                                    int cy = neighborY + offsetY * _rows;
+                                    if (IsCandidateValid(cx, cy)) { selectedX = cx; selectedY = cy; used = true; break; }
+                                }
+                                if (used) break;
                             }
-                            if (used) break;
                         }
                     }
                 }
@@ -292,5 +337,36 @@ public sealed class HexCellGrid : ICellGrid
         destX[ni] = -1; destY[ni] = -1; ni++;
 
         return ni;
+    }
+
+    // Private helpers
+    private bool IsMaskedCell(int x, int y) {
+        return IsMaskedCell(x, y, _centerAr);
+    }
+
+    private bool IsMaskedCell(int x, int y, int centerAr)
+    {
+        // Derive a hex-shaped mask based on three axis extents derived from
+        // the provided WIDTH (_cols), HEIGHT (_rows) and DEPTH (Depth).
+        // Convert offset coords (odd-q vertical layout) to axial then to cube
+        // coordinates centered on the backing grid, then test against radii.
+
+        // radii along cube axes: map WIDTH -> rx (cube x), HEIGHT -> rz (cube z), DEPTH -> ry (cube y)
+        int rx = Math.Max(0, (_cols - 1) / 2) + 1;
+        int rz = Math.Max(0, (_rows - 1) / 2) + 1;
+        int ry = Math.Max(0, (_depth - 1) / 2) + 1;
+
+        // offset (odd-q) -> axial
+        // Convert from odd-q (vertical layout where odd columns are offset down)
+        // to axial coordinates (q = col, r = row adjusted for offset).
+        int aq = x;
+        int ar = y - ((x - (x & 1)) / 2);
+
+        // cube coords relative to center
+        int cx = aq - _centerAq;
+        int cz = ar - _centerAr;
+        int cy = -cx - cz;
+
+        return Math.Abs(cx) < rx && Math.Abs(cy) < ry && Math.Abs(cz) < rz;
     }
 }

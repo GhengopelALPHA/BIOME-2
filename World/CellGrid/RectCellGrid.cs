@@ -7,45 +7,45 @@ namespace Biome2.World.CellGrid;
 /// </summary>
 public sealed class RectCellGrid : ICellGrid
 {
-    private readonly CellGrid _inner;
+    private readonly DataGrid _dataGrid;
+    // Public properties
+    public int Width => _dataGrid.Width;
+    public int Height => _dataGrid.Height;
 
+    public ReadOnlySpan<byte> CurrentSpan => _dataGrid.CurrentSpan;
+    public Span<byte> NextSpan => _dataGrid.NextSpan;
+
+    public int IndexOf(int x, int y) => _dataGrid.IndexOf(x, y);
+
+    public bool IsValidCell(int x, int y) => x >= 0 && x < _dataGrid.Width && y >= 0 && y < _dataGrid.Height;
+
+    public byte GetCurrent(int x, int y) => _dataGrid.GetCurrent(x, y);
+
+    public void SetCurrent(int x, int y, byte value) => _dataGrid.SetCurrent(x, y, value);
+
+    public void SetNext(int x, int y, byte value) => _dataGrid.SetNext(x, y, value);
+
+    public void SwapBuffers() => _dataGrid.SwapBuffers();
+
+    public void CopyCurrentToNext() => _dataGrid.CopyCurrentToNext();
+
+    public void Clear(byte value = 0) => _dataGrid.Clear(value); 
+
+    // Constructors
     public RectCellGrid(int width, int height) {
-        _inner = new CellGrid(width, height);
+        _dataGrid = new DataGrid(width, height);
     }
 
-    public RectCellGrid(CellGrid existing) {
-        _inner = existing ?? throw new ArgumentNullException(nameof(existing));
+    public RectCellGrid(DataGrid existing) {
+        _dataGrid = existing ?? throw new ArgumentNullException(nameof(existing));
     }
-
-    public int Width => _inner.Width;
-    public int Height => _inner.Height;
-
-
-	public ReadOnlySpan<byte> CurrentSpan => _inner.CurrentSpan;
-	public Span<byte> NextSpan => _inner.NextSpan;
-
-	public int IndexOf(int x, int y) => _inner.IndexOf(x, y);
-
-	public bool IsValidCell(int x, int y) => x >= 0 && x < _inner.Width && y >= 0 && y < _inner.Height;
-
-	public byte GetCurrent(int x, int y) => _inner.GetCurrent(x, y);
-
-	public void SetCurrent(int x, int y, byte value) => _inner.SetCurrent(x, y, value);
-
-	public void SetNext(int x, int y, byte value) => _inner.SetNext(x, y, value);
-
-	public void SwapBuffers() => _inner.SwapBuffers();
-
-	public void CopyCurrentToNext() => _inner.CopyCurrentToNext();
-
-	public void Clear(byte value = 0) => _inner.Clear(value); 
 
     public int GetNeighbors(int x, int y, EdgeMode edgeMode, Span<byte> dest) {
         if (dest.Length < 8) throw new ArgumentException("dest must be at least length 8", nameof(dest));
 
         int ni = 0;
-        int width = _inner.Width;
-        int height = _inner.Height;
+        int width = _dataGrid.Width;
+        int height = _dataGrid.Height;
 
         for (int oy = -1; oy <= 1; oy++) {
             for (int ox = -1; ox <= 1; ox++) {
@@ -86,7 +86,7 @@ public sealed class RectCellGrid : ICellGrid
                         break;
                 }
 
-                dest[ni++] = useNeighbor ? _inner.GetCurrent(nx, ny) : backupNeighborValue;
+                dest[ni++] = useNeighbor ? _dataGrid.GetCurrent(nx, ny) : backupNeighborValue;
             }
         }
 
@@ -96,8 +96,8 @@ public sealed class RectCellGrid : ICellGrid
     public int GetNeighborCoordinates(int x, int y, EdgeMode edgeMode, Span<int> destX, Span<int> destY) {
         if (destX.Length < 8 || destY.Length < 8) throw new ArgumentException("destX/destY must be at least length 8");
         int ni = 0;
-        int width = _inner.Width;
-        int height = _inner.Height;
+        int width = _dataGrid.Width;
+        int height = _dataGrid.Height;
 
         for (int oy = -1; oy <= 1; oy++) {
             for (int ox = -1; ox <= 1; ox++) {

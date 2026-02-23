@@ -114,10 +114,13 @@ public sealed class BiomeApp : GameWindow {
 		// handle interactions like panning and placement (uses camera, renderer, simulation)
 		_input.HandleInteractions(_camera, _renderer, _simulation);
 
-		_renderer.Render(_camera);
-
-		// Draw placement highlight overlay (based on input)
-		_renderer.DrawHighlight(_camera, _input);
+		// If drawing is enabled, render every frame. If disabled, only render when
+		// an interaction occurred that should update the view (panning/placement).
+		if (_renderer.DrawingEnabled || _input.HadInteraction) {
+			_renderer.Render(_camera);
+			// Draw placement highlight overlay (based on input)
+			_renderer.DrawHighlight(_camera, _input);
+		}
 
         // Render UI on top of world
         _ui?.RenderUI(_renderer, _simulation, _input, _camera);

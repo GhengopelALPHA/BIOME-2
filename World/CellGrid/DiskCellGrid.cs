@@ -10,17 +10,29 @@ namespace Biome2.World.CellGrid;
 /// </summary>
 public sealed class DiskCellGrid : ICellGrid
 {
-    private readonly CellGrid _inner;
-    private readonly int[] _ringCounts;
+    // Fields
+    private readonly DataGrid _dataGrid;
+
     private readonly int _rings;
+    private readonly int[] _ringCounts;
     private readonly int _outerCount;
 
+    // Public properties
+    public int RingsCount => _rings;
+    public int Width => _dataGrid.Width;
+    public int Height => _dataGrid.Height;
+
+    public ReadOnlySpan<byte> CurrentSpan => _dataGrid.CurrentSpan;
+    public Span<byte> NextSpan => _dataGrid.NextSpan;
+
+    // Methods (constructors + public API)
     public DiskCellGrid(int rings, int outerCount)
     {
         _rings = Math.Max(1, rings);
         _outerCount = Math.Max(3, outerCount);
+
         // underlying storage: columns = rings, rows = outerCount
-        _inner = new CellGrid(_rings, _outerCount);
+        _dataGrid = new DataGrid(_rings, _outerCount);
         _ringCounts = ComputeRingCounts(_rings, _outerCount);
     }
 
@@ -51,37 +63,9 @@ public sealed class DiskCellGrid : ICellGrid
     }
 
     // Expose helper properties used by renderer to build logical coords list
-    public int RingsCount => _rings;
     public int RingCountAt(int ring) => (ring >= 0 && ring < _rings) ? _ringCounts[ring] : 0;
 
-    private static int[] ComputeRingCounts(int rings, int outerCount)
-    {
-        var arr = new int[rings];
-        if (rings == 1)
-        {
-            arr[0] = outerCount;
-            return arr;
-        }
-
-        for (int r = 0; r < rings; r++)
-        {
-            // linear interpolation between 3 (minimum) and outerCount
-            double t = (double)r / (rings - 1);
-            int val = (int)Math.Round(3 + t * (outerCount - 3));
-            if (val < 3) val = 3;
-            arr[r] = val;
-        }
-
-        return arr;
-    }
-
-    public int Width => _inner.Width;
-    public int Height => _inner.Height;
-
-    public ReadOnlySpan<byte> CurrentSpan => _inner.CurrentSpan;
-    public Span<byte> NextSpan => _inner.NextSpan;
-
-    public int IndexOf(int x, int y) => _inner.IndexOf(x, y);
+    public int IndexOf(int x, int y) => _dataGrid.IndexOf(x, y);
 
     public bool IsValidCell(int ring, int pos)
     {
@@ -93,24 +77,24 @@ public sealed class DiskCellGrid : ICellGrid
     public byte GetCurrent(int x, int y)
     {
         if (!IsValidCell(x, y)) return 0;
-        return _inner.GetCurrent(x, y);
+        return _dataGrid.GetCurrent(x, y);
     }
 
     public void SetCurrent(int x, int y, byte value)
     {
         if (!IsValidCell(x, y)) return;
-        _inner.SetCurrent(x, y, value);
+        _dataGrid.SetCurrent(x, y, value);
     }
 
     public void SetNext(int x, int y, byte value)
     {
         if (!IsValidCell(x, y)) return;
-        _inner.SetNext(x, y, value);
+        _dataGrid.SetNext(x, y, value);
     }
 
-    public void SwapBuffers() => _inner.SwapBuffers();
-    public void CopyCurrentToNext() => _inner.CopyCurrentToNext();
-    public void Clear(byte value = 0) => _inner.Clear(value);
+    public void SwapBuffers() => _dataGrid.SwapBuffers();
+    public void CopyCurrentToNext() => _dataGrid.CopyCurrentToNext();
+    public void Clear(byte value = 0) => _dataGrid.Clear(value);
 
     /// <summary>
     /// Populate dest with the eight neighbor values for logical disk neighbors.
@@ -168,7 +152,7 @@ public sealed class DiskCellGrid : ICellGrid
                 return edgeMode == EdgeMode.INFINITE ? backupInfinite : backupBorder;
             }
 
-            return _inner.GetCurrent(rr, wrapped);
+            return _dataGrid.GetCurrent(rr, wrapped);
         }
 
         // Inner ring neighbors
@@ -451,5 +435,27 @@ public sealed class DiskCellGrid : ICellGrid
         }
 
         return ni;
+    }
+
+    // Private helpers
+    private static int[] ComputeRingCounts(int rings, int outerCount)
+    {
+        var arr = new int[rings];
+        if (rings == 1)
+        {
+            arr[0] = outerCount;
+            return arr;
+        }
+
+        for (int r = 0; r < rings; r++)
+        {
+            // linear interpolation between 3 (minimum) and outerCount
+            double t = (double)r / (rings - 1);
+            int val = (int)Math.Round(3 + t * (outerCount - 3));
+            if (val < 3) val = 3;
+            arr[r] = val;
+        }
+
+        return arr;
     }
 }

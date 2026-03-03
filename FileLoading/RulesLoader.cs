@@ -12,7 +12,8 @@ namespace Biome2.FileLoading;
 /// </summary>
 public sealed class RulesLoader {
     public static WorldModel Load(string path) {
-		Logger.Info($"===> Loading rules from file: {path} <===");
+		var fileName = Path.GetFileName(path);
+		Logger.Info($"===> Loading rules from file: {fileName} <===");
 
 		var lines = File.ReadAllLines(path);
 

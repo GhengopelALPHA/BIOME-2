@@ -5,15 +5,21 @@
 /// Later, this will help support fast forward, fixed timestep, pause, and headless mode.
 /// </summary>
 public sealed class SimulationClock {
-	public bool Paused { get; set; } = true;
+	private bool Paused { get; set; } = true;
 
 	// Fixed timestep for deterministic updates later.
-	public float FixedStepSeconds { get; set; } = 1.0f / 30.0f;
+	private float FixedStepSeconds { get; set; } = 1.0f / 30.0f;
 
 	// DelayTime: extra delay in seconds added to each simulation step. 0.0 = no extra delay.
-	public float DelayTime { get; set; } = 0.0f;
+	internal float DelayTime { get; set; } = 0.0f;
 
 	private float _accumulatorSeconds;
+
+	internal void SetPaused(bool paused) {
+		Paused = paused;
+	}
+
+	public bool IsPaused() => Paused;
 
 	public int ConsumeSteps(float dtSeconds) {
 		if (Paused)

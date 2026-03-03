@@ -15,10 +15,8 @@ internal sealed class ToolboxWindow
 	private const string DebugRulesButtonLabel = "Debug Rules";
 	private const string RestartWorldButtonLabel = "Restart World";
 
-	// Stored delay values to avoid recalculating every frame. They are updated
-	// only when the user moves the slider.
+	// Stored delay value. Updated only when the user moves the slider.
 	// Defaults: delay = 0, slider position = 0.
-	private float CurrentDelay { get; set; } = 0.0f;
     private int DelayMs { get; set; } = 0;
     // Cached slider position.
     private float DelaySliderPos { get; set; } = 0.0f;
@@ -76,54 +74,20 @@ internal sealed class ToolboxWindow
             ImGui.SetCursorPosX((_windowWidth - buttonWidth) * 0.5f);
         }
         if (ImGui.Button(LoadRulesButtonLabel)) {
-			simulation.Clock.Paused = true;
-            // Attempt to show a native file dialog per-platform.
-            string? selected = null;
-
-            try {
-                // Use WinForms OpenFileDialog directly since app now targets Windows.
-                try {
-                    using var ofd = new System.Windows.Forms.OpenFileDialog();
-                    ofd.Filter = "Rules files|*.bio;*.txt|All files|*.*";
-                    ofd.Multiselect = false;
-                    // Start dialog in the directory where the executable resides.
-                    try {
-                        ofd.InitialDirectory = AppContext.BaseDirectory;
-                    } catch {
-                        // ignore if unable to set
-                    }
-                    var res = ofd.ShowDialog();
-                    if (res == System.Windows.Forms.DialogResult.OK) selected = ofd.FileName;
-                } catch (Exception ex) {
-                    Logger.Error($"Windows file dialog failed: {ex.Message}");
-                }
-
-                if (!string.IsNullOrEmpty(selected) && File.Exists(selected)) {
-                    var loader = new FileLoading.RulesLoader();
-                    var request = FileLoading.RulesLoader.Load(selected);
-
-                    // Apply to simulation controller via new ApplyRules API
-                    simulation.ApplyRules(request);
-                    try {
-                        simulation.LastLoadedRulesFilePath = selected;
-                    } catch { }
-                }
-            } catch (Exception ex) {
-                Logger.Error($"Failed to load rules file: {ex.Message}");
-            }
-		}
+            // Delegate to SimulationController to handle prompting and applying rules.
+            simulation.LoadRulesFromUserPrompt();
+        }
 
 		// Pause toggle
-		bool paused = simulation.Clock.Paused;
+		bool paused = simulation.IsPaused();
         if (ImGui.Checkbox("Paused", ref paused)) {
-            simulation.Clock.Paused = paused;
+            simulation.SetPaused(paused);
         }
 
 		// Delay time slider: use a nonlinear curve so mid slider values yield small millisecond delays.
 		// Mapping: DelayTime (seconds) = slider^expo * 1.0 (max 1s). Inverse used to position the slider.
-		const int DelaySliderExponent = 4;
-        string tickDelayText;
-        if (CurrentDelay > 0.0f && DelayMs < 1)
+		string tickDelayText;
+        if (DelayMs == 1)
             tickDelayText = $"Tick Delay: ~{DelayMs} ms";
         else
             tickDelayText = $"Tick Delay: {DelayMs} ms";
@@ -136,10 +100,9 @@ internal sealed class ToolboxWindow
 		if (ImGui.SliderFloat("##TickDelayTime", ref sliderPos, 0.0f, 1.0f)) {
 			// store new slider position
 			DelaySliderPos = sliderPos;
-			float newDelay = MathF.Pow(Math.Clamp(sliderPos, 0.0f, 1.0f), DelaySliderExponent);
-			simulation.Clock.DelayTime = newDelay;
-			CurrentDelay = newDelay;
-			DelayMs = (int) Math.Round(CurrentDelay * 1000.0f);
+			float newDelay = MathF.Pow(Math.Clamp(sliderPos, 0.0f, 1.0f),  4);
+			simulation.SetDelayTime(newDelay);
+			DelayMs = (int) Math.Ceiling(newDelay * 1000.0f);
 		}
 		ImGui.PopItemWidth();
 
@@ -209,11 +172,7 @@ internal sealed class ToolboxWindow
 			ImGui.SetCursorPosX((_windowWidth - buttonWidth) * 0.5f);
 		}
 		if (ImGui.Button(RestartWorldButtonLabel)) {
-			try {
-				simulation.RestartWorld(_gridWidth, _gridHeight, _gridDepth);
-			} catch (Exception ex) {
-				Logger.Error($"Failed to restart world: {ex.Message}");
-			}
+			simulation.RestartWorld(_gridWidth, _gridHeight, _gridDepth);
 		}
 
 		ImGui.Separator();
@@ -282,25 +241,16 @@ internal sealed class ToolboxWindow
 
 		ImGui.Separator();
 
-        // Debug Rules button: reconstruct a readable rule line from the simulation's stored rules
-        {
-            var textSize = ImGui.CalcTextSize(DebugRulesButtonLabel);
+		// Debug Rules button: display loaded rules and the operation counts for each rule in the console log. This is useful for verifying rules are loaded and diagnosing rules that may be too expensive to run.
+		{
+			var textSize = ImGui.CalcTextSize(DebugRulesButtonLabel);
             var framePadding = ImGui.GetStyle().FramePadding;
             var buttonWidth = textSize.X + framePadding.X * 2.0f;
             ImGui.SetCursorPosX((_windowWidth - buttonWidth) * 0.5f);
         }
         if (ImGui.Button(DebugRulesButtonLabel)) {
-            var rules = simulation.Rules;
-            if (rules == null || rules.Count == 0) {
-                Logger.Info("Debug Rules: no rules loaded.");
-            } else {
-                Logger.Info("  ===== Rules =====");
-                foreach (var r in rules) {
-					r.ReportRuleDetails();
-                }
-                Logger.Info("  === End Rules ===");
-            }
-        }
+			simulation.ReportRuleOps();
+		}
 
 		_windowWidth = ImGui.GetWindowWidth();
 

@@ -37,8 +37,7 @@ public sealed class SimulationRuleModel(
 
     public void IncrementOpCount() => ++_opCount;
 
-    public void ReportRuleDetails() {
-        if (_opCount == 0) 
-            Logger.Info($"{VerboseRule}\t\t - zero operations");
+    public void ReportRuleDetails(bool shouldShowInConsole) {
+        Logger.Info($"{VerboseRule}\t\t - {_opCount} operations", shouldShowInConsole);
     }
 }

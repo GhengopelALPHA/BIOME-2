@@ -1,6 +1,9 @@
 ﻿using Biome2.World;
+using System.IO;
 using Biome2.Diagnostics;
 using Biome2.FileLoading.Models;
+using Biome2.FileLoading;
+using Biome2.Graphics.UI;
 using Biome2.World.CellGrid;
 
 namespace Biome2.Simulation;
@@ -57,35 +60,90 @@ public sealed class SimulationController : IDisposable {
         }
     }
 
+    public void PauseSimulation() {
+        Clock.SetPaused(true);
+	}
+
+    public void ResumeSimulation() {
+        Clock.SetPaused(false);
+	}
+
+    public void SetPaused(bool paused) {
+        Clock.SetPaused(paused);
+	}
+
+	public bool IsPaused() => Clock.IsPaused();
+
+    public void SetDelayTime(float delaySeconds) {
+        Clock.DelayTime = Math.Max(0.0f, delaySeconds);
+	}
+
     /// <summary>
-    /// Restart the world to the initial state but with explicit width/height.
-    /// If a last-applied WorldModel exists, it will be re-applied with the
-    /// supplied dimensions overriding the file values.
+    /// Prompt the user (via the UI layer) to select a rules file, load it, and apply it to the simulation.
+    /// This method centralizes pause/restore behavior and error handling so callers (e.g. ToolboxWindow)
+    /// simply invoke it when the user requests a file load.
     /// </summary>
-    public void RestartWorld(int width, int height, int depth)
+    public void LoadRulesFromUserPrompt()
     {
-        if (_lastWorldModel != null)
-        {
-            var config = new WorldConfigModel(
-                width: width,
-                height: height,
-                depth: depth,
-                gridTopology: _lastWorldModel.Config.GridTopology,
-                edgeMode: _lastWorldModel.Config.Edges,
-                paused: _lastWorldModel.Config.Paused
-            );
+        var prevPaused = IsPaused();
+        PauseSimulation();
 
-			var req = new WorldModel(
-                config: config,
-				species: _lastWorldModel.Species,
-                layers: _lastWorldModel.Layers,
-                rules: _lastWorldModel.Rules
-			);
+        try {
+            string? selected = FileLoaderUI.PromptForRulesFile();
 
-            ApplyRules(req);
-            return;
+            if (string.IsNullOrEmpty(selected) || !File.Exists(selected)) {
+                // No file selected or file missing - restore previous pause state.
+                SetPaused(prevPaused);
+                return;
+            }
+
+            try {
+                var request = RulesLoader.Load(selected);
+                ApplyRules(request);
+                try { LastLoadedRulesFilePath = selected; } catch { }
+            } catch (Exception ex) {
+                Logger.Error($"Failed to load rules file: {ex.Message}");
+                SetPaused(prevPaused);
+            }
+        } catch (Exception ex) {
+            Logger.Error($"Failed during rules file prompt/load: {ex.Message}");
+            SetPaused(prevPaused);
         }
     }
+
+	/// <summary>
+	/// Restart the world to the initial state but with explicit width/height.
+	/// If a last-applied WorldModel exists, it will be re-applied with the
+	/// supplied dimensions overriding the file values.
+	/// </summary>
+	public void RestartWorld(int width, int height, int depth)
+    {
+		try {		
+		    if (_lastWorldModel != null)
+            {
+                var config = new WorldConfigModel(
+                    width: width,
+                    height: height,
+                    depth: depth,
+                    gridTopology: _lastWorldModel.Config.GridTopology,
+                    edgeMode: _lastWorldModel.Config.Edges,
+                    paused: _lastWorldModel.Config.Paused
+                );
+
+			    var req = new WorldModel(
+                    config: config,
+				    species: _lastWorldModel.Species,
+                    layers: _lastWorldModel.Layers,
+                    rules: _lastWorldModel.Rules
+			    );
+
+                ApplyRules(req);
+                return;
+            }
+		} catch (Exception ex) {
+			Logger.Error($"Failed to restart world: {ex.Message}");
+		}
+	}
 
     // Immediate placement for visual feedback; writes both current and next buffers. Caller holds lock.
     public void PlaceImmediate(int layerIndex, int x, int y, byte speciesValue) {
@@ -109,7 +167,7 @@ public sealed class SimulationController : IDisposable {
         _perf = perf;
 
         // Start paused, since we have no rules yet.
-        Clock.Paused = true;
+        PauseSimulation();
 
         // Start background stepping so simulation can run as fast as possible independent of render.
         _cts = new CancellationTokenSource();
@@ -137,7 +195,7 @@ public sealed class SimulationController : IDisposable {
 				// Apply any pending manual placements queued by the UI into the next buffers now that they are prepared.
 				_world.ApplyPendingPlacements();
 
-				if (Clock.Paused) {
+				if (Clock.IsPaused()) {
 					await Task.Delay(1, token).ConfigureAwait(false);
 					continue;
 				}
@@ -164,7 +222,7 @@ public sealed class SimulationController : IDisposable {
         _lastWorldModel = worldModel;
 
         // Immediately apply pause setting so background loop respects it quickly.
-        Clock.Paused = worldModel.Config.Paused;
+        Clock.SetPaused(worldModel.Config.Paused);
 
         // Determine sizing: prefer file-provided positive values, otherwise keep current world values.
         int newWidth = worldModel.Config.Width > 0 ? worldModel.Config.Width : Math.Max(1, _world.WidthCells);
@@ -453,5 +511,22 @@ public sealed class SimulationController : IDisposable {
 		}
 
 		return allReactantsMatch;
+	}
+
+	public void ReportRuleOps() {
+		if (Rules == null || Rules.Count == 0) {
+			Logger.Info("Debug Rules: no rules loaded.");
+		} else {
+			Logger.Info("  ===== Rules =====");
+			var shouldShowInConsole = true;
+			if (Rules.Count > 200) {
+				Logger.Warn($"  Too many rules to display here ({ Rules.Count}); see log.txt for full output.");
+				shouldShowInConsole = false;
+			}
+			foreach (var r in Rules) {
+				r.ReportRuleDetails(shouldShowInConsole);
+			}
+			Logger.Info("  === End Rules ===");
+		}
 	}
 }

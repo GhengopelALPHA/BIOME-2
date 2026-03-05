@@ -359,8 +359,6 @@ public sealed class RulesLoader {
 							if (count < 0) {
 								LogLineParseError($"Reactant count must be positive, got '{count}'", core[..idx]);
 							}
-						} else {
-							LogLineParseInfo($"No explicit count found for reactant '{tok}'. Defaulting to 1");
 						}
 
 						// species part may include an explicit layer like LAYER:SPECIES
@@ -375,6 +373,7 @@ public sealed class RulesLoader {
 
 						if (reactLayer == string.Empty && count == -1) {
 							// default count of 1 is applied if no explicit count is provided and no layer prefix is present
+							LogLineParseInfo($"No explicit count found for reactant '{tok}'. Defaulting to 1");
 							count = 1;
 						}
 
@@ -397,6 +396,18 @@ public sealed class RulesLoader {
 						var group = kv.Value;
 
 						if (group.Count == 1) { merged.Add(group[0]); continue; }
+
+						// For move-style rules, the mover reactant is expected to be a single-count
+						// neutral-sign reactant (count==1, Sign==0) and must not be merged.
+						// Detect such a mover-like reactant and skip merging this group so
+						// the mover remains as an individual reactant for later processing.
+						if (isMoveLine) {
+							bool hasMoverLike = group.Exists(r => r.Count == 1 && r.Sign == 0 && !r.Exclusion);
+							if (hasMoverLike) {
+								merged.AddRange(group);
+								continue;
+							}
+						}
 
 						// Check for exclusion conflicts: if any exclusion and others present, warn and keep originals
 						bool hasExclusion = group.Exists(r => r.Exclusion);

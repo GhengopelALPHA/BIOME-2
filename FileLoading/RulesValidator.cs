@@ -84,7 +84,7 @@ public static class RulesValidator
 					}
 				}
 			}
-			if (r.OriginSpeciesName.Equals(r.NewSpeciesName, StringComparison.OrdinalIgnoreCase)) {
+			if (r.OriginSpeciesName.Equals(r.NewSpeciesName, StringComparison.OrdinalIgnoreCase) && r.MoveSpeciesName == string.Empty) {
 				Logger.Warn($"{r.VerboseRule}: origin and new species cannot be the same ('{r.OriginSpeciesName}').");
 				ok = false;
 			}
